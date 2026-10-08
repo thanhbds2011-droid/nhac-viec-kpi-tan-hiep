@@ -3,129 +3,138 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#126777" />
-  <meta name="description" content="Đăng ký lịch nhắc KPI cá nhân, chọn ngày và giờ để không quên thời hạn công việc." />
+  <meta name="theme-color" content="#1054c3" />
+  <meta name="description" content="Nhắc việc KPI cá nhân – Trung tâm Bảo trợ xã hội Tân Hiệp." />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="Nhắc việc KPI" />
+  <meta name="mobile-web-app-capable" content="yes" />
   <title>Nhắc việc KPI – Tân Hiệp</title>
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-  <link rel="stylesheet" href="/styles.css" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+  <link rel="stylesheet" href="/styles.css?v=1.2.0" />
   <script defer src="https://accounts.google.com/gsi/client"></script>
   <script defer src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js"></script>
-  <script defer src="/app.js"></script>
+  <script defer src="/app.js?v=1.2.0"></script>
 </head>
 <body>
-  <div class="shell">
-    <header class="topbar">
-      <div class="brand">
-        <span class="brand-icon" aria-hidden="true">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9Z"/><path d="M10 21h4"/></svg>
-        </span>
-        <div class="brand-text">
-          <h1>NHẮC VIỆC KPI</h1>
-          <p>Trung tâm Bảo trợ xã hội Tân Hiệp</p>
-        </div>
+<div class="shell">
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-icon" aria-hidden="true">🔔</span>
+      <div class="brand-text"><h1>NHẮC VIỆC KPI</h1><p>TÂN HIỆP</p></div>
+    </div>
+    <button id="signoutBtn" class="signout hide" type="button">Đăng xuất</button>
+  </header>
+  <main id="mainContent">
+    <div id="toast" class="toast hide" role="status" aria-live="polite"></div>
+    <section id="loginView" class="login-wrap" aria-label="Đăng nhập ứng dụng">
+      <div class="login-panel panel">
+        <div class="login-symbol" aria-hidden="true">🔔</div>
+        <h2>Nhắc hạn công việc, đúng thời điểm</h2>
+        <p>Đăng nhập bằng tài khoản Google đã được cấp quyền để sử dụng ứng dụng.</p>
+        <div class="login-action"><div id="googleButton" class="google-button"></div>
+          <p id="loginHint" class="hint" role="status">Đang khởi tạo đăng nhập…</p></div>
+        <p class="access-note">Trung tâm Bảo trợ xã hội Tân Hiệp</p>
       </div>
-      <button class="signout hide" id="signoutBtn" type="button">Đăng xuất</button>
-    </header>
-
-    <main id="mainContent">
-      <div id="toast" class="toast hide" role="status" aria-live="polite"></div>
-
-      <section id="loginView" class="login-wrap" aria-label="Đăng nhập ứng dụng">
-        <div class="login-panel panel">
-          <span class="login-symbol" aria-hidden="true">🔔</span>
-          <h2>Đừng quên hạn công việc</h2>
-          <p>Đăng ký ngày và giờ, nhận tối đa 4 lượt nhắc tự động — kể cả cuối tuần, lễ, Tết.</p>
-          <div class="login-action">
-            <div id="googleButton" class="google-button"></div>
-            <p id="loginHint" class="hint" role="status">Đang khởi tạo đăng nhập…</p>
-          </div>
-          <p class="access-note">Dành cho tài khoản Google đã được cấp quyền.</p>
-        </div>
+    </section>
+    <div id="appView" class="hide" data-pane="list">
+      <section class="overview" aria-label="Thông tin cá nhân">
+        <div class="welcome"><span class="welcome-title">Xin chào, <strong id="displayName">bạn</strong></span>
+          <span id="accountEmail" class="account-email"></span></div>
+        <div class="task-total"><strong id="taskCount">0</strong><span>việc theo dõi</span></div>
       </section>
-
-      <div id="appView" class="hide">
-        <section class="overview" aria-label="Thông tin cá nhân">
-          <div class="welcome">
-            <span class="welcome-title">Xin chào, <strong id="displayName">bạn</strong></span>
-            <span class="account-email" id="accountEmail"></span>
-          </div>
-          <div class="task-total" aria-label="Số công việc đang theo dõi"><strong id="taskCount">0</strong><span>việc đang theo dõi</span></div>
-        </section>
-
-        <section class="notification-bar" aria-label="Trạng thái thông báo">
-          <div class="notification-info">
-            <span class="status-dot" id="pushDot" aria-hidden="true"></span>
-            <div>
-              <strong id="pushStatus" role="status">Đang kiểm tra thông báo</strong>
-              <p id="pushDetail">Hãy cấp quyền thông báo cho thiết bị này.</p>
-            </div>
-          </div>
-          <button class="secondary push-button" id="enablePush" type="button">Bật thông báo</button>
-        </section>
-
-        <nav class="mobile-nav" aria-label="Chuyển giữa thêm việc và danh sách">
-          <button type="button" id="tabCreate" class="mobile-nav-button is-active" aria-pressed="true">＋ Đăng ký</button>
-          <button type="button" id="tabList" class="mobile-nav-button" aria-pressed="false">Danh sách <span id="mobileCount" class="nav-count">0</span></button>
-        </nav>
-
-        <div class="workspace">
-          <section class="panel form-panel mobile-pane is-mobile-active" id="createPane" aria-label="Thêm hoặc sửa công việc">
-            <div class="panel-header">
-              <h2 id="formHeading">Thêm công việc</h2>
-              <button type="button" class="text-button hide" id="cancelEdit">Hủy sửa</button>
-            </div>
-            <form id="taskForm">
-              <div class="field">
-                <label for="taskTitle">Tên công việc <span class="req" aria-label="bắt buộc">*</span></label>
-                <input id="taskTitle" type="text" maxlength="90" required placeholder="Ví dụ: Nộp minh chứng KPI" autocomplete="off" />
-              </div>
-              <div class="date-time-fields">
-                <div class="field">
-                  <label for="dueDate">Ngày đến hạn <span class="req" aria-label="bắt buộc">*</span></label>
-                  <input id="dueDate" type="date" required />
-                </div>
-                <div class="field">
-                  <label for="taskTime">Giờ nhắc <span class="req" aria-label="bắt buộc">*</span></label>
-                  <input id="taskTime" type="time" step="60" required />
-                </div>
-              </div>
-              <div class="preview-box" aria-label="Lịch thông báo dự kiến">
-                <div class="preview-title"><strong>4 lần nhắc dự kiến</strong><span>Giờ Việt Nam · kể cả ngày nghỉ</span></div>
-                <div class="preview-list" id="datePreview" aria-live="polite">Chọn ngày và giờ để xem lịch nhắc.</div>
-              </div>
-              <button class="primary save-button" id="saveTask" type="submit">＋ Lưu công việc</button>
-            </form>
-            <details class="settings-details" id="defaultSettings">
-              <summary>Giờ mặc định <span id="defaultTimeLabel">07:30</span><span class="summary-chevron" aria-hidden="true">⌄</span></summary>
-              <div class="default-controls">
-                <label for="defaultTime">Giờ dùng khi thêm công việc mới</label>
-                <div class="default-input-row">
-                  <input id="defaultTime" type="time" step="60" aria-label="Giờ mặc định" />
-                  <button type="button" class="small secondary" id="saveDefaultTime">Lưu giờ</button>
-                </div>
-                <p>Không thay đổi giờ nhắc của các công việc đã đăng ký.</p>
-              </div>
-            </details>
-          </section>
-
-          <section class="panel list-panel mobile-pane" id="listPane" aria-label="Danh sách công việc cá nhân">
-            <div class="panel-header list-header">
-              <h2>Công việc của tôi</h2>
-              <button type="button" class="text-button" id="reloadBtn" title="Tải lại công việc từ máy chủ">↻ Làm mới</button>
-            </div>
-            <div class="tasks" id="taskList" aria-live="polite"><div class="empty">Bạn chưa có công việc nào.</div></div>
-          </section>
+      <section class="notification-bar" aria-label="Trạng thái thông báo">
+        <div class="notification-info"><span class="status-dot" id="pushDot" aria-hidden="true"></span>
+          <div><strong id="pushStatus" role="status">Đang kiểm tra thông báo</strong>
+            <p id="pushDetail">Hãy cấp quyền thông báo cho thiết bị này.</p></div>
         </div>
+        <button class="secondary push-button" id="enablePush" type="button">Bật thông báo</button>
+      </section>
+      <div class="workspace">
+        <section class="panel form-panel mobile-pane" id="createPane" aria-label="Thêm hoặc sửa công việc">
+          <div class="panel-header"><button type="button" id="backToList" class="icon-back" aria-label="Quay về danh sách">‹</button>
+            <h2 id="formHeading">Thêm công việc</h2><button type="button" class="text-button hide" id="cancelEdit">Hủy sửa</button>
+          </div>
+          <form id="taskForm">
+            <div class="field"><label for="taskTitle">Tên công việc <span class="req">*</span></label>
+              <input id="taskTitle" type="text" maxlength="90" required placeholder="Ví dụ: Báo cáo quý IV" autocomplete="off" /></div>
+            <div class="date-time-fields">
+              <div class="field"><label for="dueDate">Ngày đến hạn <span class="req">*</span></label>
+                <input id="dueDate" type="date" required /></div>
+              <div class="field"><label for="taskTime">Giờ nhắc <span class="req">*</span></label>
+                <input id="taskTime" type="time" step="60" required /></div>
+            </div>
+            <div class="preview-box" aria-label="Lịch thông báo dự kiến"><div class="preview-title">
+              <strong>Lịch nhắc (tự động)</strong><span>Giờ Việt Nam · kể cả ngày nghỉ</span></div>
+              <div class="preview-list" id="datePreview" aria-live="polite">Chọn ngày và giờ để xem lịch nhắc.</div></div>
+            <div class="form-actions"><button type="button" class="secondary" id="formCancel">Hủy</button>
+              <button class="primary save-button" id="saveTask" type="submit">Lưu công việc</button></div>
+          </form>
+          <details class="settings-details" id="defaultSettings"><summary>Giờ mặc định <span id="defaultTimeLabel">07:30</span><span class="summary-chevron" aria-hidden="true">⌄</span></summary>
+            <div class="default-controls"><label for="defaultTime">Giờ dùng khi thêm công việc mới</label>
+              <div class="default-input-row"><input id="defaultTime" type="time" step="60" aria-label="Giờ mặc định" />
+                <button type="button" class="small secondary" id="saveDefaultTime">Lưu giờ</button></div>
+              <p>Không thay đổi giờ nhắc của các công việc đã đăng ký.</p></div>
+          </details>
+        </section>
+        <section class="panel list-panel mobile-pane is-mobile-active" id="listPane" aria-label="Danh sách công việc cá nhân">
+          <div class="panel-header list-header"><h2>Công việc của tôi</h2>
+            <button type="button" class="text-button" id="reloadBtn" title="Tải lại công việc từ máy chủ">↻ Làm mới</button></div>
+          <div class="filters" aria-label="Lọc công việc">
+            <button type="button" class="filter is-active" data-filter="all" aria-pressed="true">Tất cả <span id="mobileCount">0</span></button>
+            <button type="button" class="filter" data-filter="soon" aria-pressed="false">Sắp đến hạn</button>
+            <button type="button" class="filter" data-filter="past" aria-pressed="false">Đã quá hạn</button>
+          </div>
+          <div class="tasks" id="taskList" aria-live="polite"><div class="empty">Bạn chưa có công việc nào.</div></div>
+        </section>
+        <section class="panel detail-panel mobile-pane" id="schedulePane" aria-label="Lịch nhắc của tôi">
+          <div class="panel-header"><h2>Lịch nhắc</h2></div>
+          <p class="section-help">Các mốc nhắc được tính tự động theo ngày dương lịch, kể cả cuối tuần và ngày lễ.</p>
+          <div id="scheduleList" class="tasks"></div>
+        </section>
+        <section class="panel detail-panel mobile-pane" id="notificationsPane" aria-label="Thông báo">
+          <div class="panel-header"><h2>Thông báo</h2></div>
+          <div class="inform-card"><span class="inform-icon" aria-hidden="true">🔔</span>
+            <strong>Thông báo nhắc việc trên thiết bị</strong>
+            <p>Thông báo được gửi qua OneSignal theo lịch đã đăng ký. Ứng dụng không lưu lịch sử các thông báo đã hiển thị trên điện thoại.</p>
+            <p id="notificationSummary" class="inline-info"></p>
+            <button type="button" id="enablePushAlt" class="primary">Kiểm tra / bật thông báo</button>
+          </div>
+        </section>
+        <section class="panel detail-panel mobile-pane" id="profilePane" aria-label="Cá nhân">
+          <div class="panel-header"><h2>Cá nhân</h2></div>
+          <div class="profile-card"><span class="avatar" id="profileAvatar">NV</span>
+            <div><strong id="profileName">Viên chức</strong><p id="profileEmail"></p></div></div>
+          <button type="button" class="menu-row" id="profileDefaultTime">⚙️ <span>Thay đổi giờ mặc định</span><span>›</span></button>
+          <button type="button" class="menu-row" id="profilePush">🔔 <span>Trạng thái thông báo</span><span>›</span></button>
+          <p class="profile-version">Phiên bản 1.2.0 · Nhắc việc KPI – Tân Hiệp</p>
+          <button type="button" class="profile-signout" id="profileSignout">Đăng xuất</button>
+          <p class="install-help" id="installHelp">iPhone: Trong Safari, chọn Chia sẻ → Thêm vào Màn hình chính. Android: chọn Cài đặt ứng dụng / Thêm vào Màn hình chính.</p>
+        </section>
       </div>
-    </main>
-    <footer>Ứng dụng hỗ trợ nhắc hạn; hãy chủ động kiểm tra hệ thống KPI chính thức.</footer>
-  </div>
-  <dialog id="confirmDialog" aria-labelledby="confirmHeading">
-    <form method="dialog" class="dialog-inner">
-      <h3 id="confirmHeading">Xóa công việc?</h3><p id="confirmText"></p>
-      <div class="dialog-actions"><button type="submit" value="cancel" class="secondary">Giữ lại</button><button type="submit" value="confirm" class="danger">Xóa công việc</button></div>
-    </form>
-  </dialog>
+      <button type="button" id="tabCreate" class="fab" aria-label="Thêm công việc" title="Thêm công việc">+</button>
+      <nav class="bottom-nav" aria-label="Điều hướng ứng dụng">
+        <button type="button" id="tabList" class="bottom-nav-button is-active" aria-current="page"><span aria-hidden="true">▤</span>Công việc</button>
+        <button type="button" id="tabSchedule" class="bottom-nav-button"><span aria-hidden="true">▦</span>Lịch nhắc</button>
+        <button type="button" id="tabNotifications" class="bottom-nav-button"><span aria-hidden="true">🔔</span>Thông báo</button>
+        <button type="button" id="tabProfile" class="bottom-nav-button"><span aria-hidden="true">◉</span>Cá nhân</button>
+      </nav>
+    </div>
+  </main>
+  <footer>Ứng dụng hỗ trợ nhắc hạn; hãy chủ động kiểm tra hệ thống KPI chính thức.</footer>
+</div>
+<dialog id="taskMenu" class="action-dialog" aria-labelledby="taskMenuTitle"><div class="action-inner">
+  <h3 id="taskMenuTitle">Công việc</h3><p id="taskMenuMeta"></p>
+  <button type="button" id="menuEdit" class="menu-action">✎ Sửa công việc</button>
+  <button type="button" id="menuDelete" class="menu-action destructive">♲ Xóa công việc</button>
+  <button type="button" id="menuClose" class="secondary menu-cancel">Hủy</button>
+</div></dialog>
+<dialog id="confirmDialog" aria-labelledby="confirmHeading"><form method="dialog" class="dialog-inner">
+  <h3 id="confirmHeading">Xóa công việc?</h3><p id="confirmText"></p>
+  <div class="dialog-actions"><button type="submit" value="cancel" class="secondary">Giữ lại</button>
+    <button type="submit" value="confirm" class="danger">Xóa công việc</button></div>
+</form></dialog>
 </body>
 </html>

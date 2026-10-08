@@ -1,10 +1,10 @@
 {
   "name": "nhac-viec-kpi-tan-hiep",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "private": true,
   "description": "Ứng dụng nhắc việc KPI tối giản, Google Login + Apps Script + OneSignal + Vercel",
   "type": "commonjs",
   "engines": {"node": ">=20"},
-  "scripts": {"start": "vercel dev", "test": "node --test tests/*.test.js", "check": "node --check api/data.js && node --check api/config.js && node --check public/app.js"},
+  "scripts": {"start": "vercel dev", "test": "node --test tests/*.test.js", "check": "node --check api/data.js && node --check api/config.js && node --check public/app.js && cp apps-script/Code.gs /tmp/nhac-viec-gs-check.js && node --check /tmp/nhac-viec-gs-check.js"},
   "dependencies": {"google-auth-library": "^9.15.1"}
 }

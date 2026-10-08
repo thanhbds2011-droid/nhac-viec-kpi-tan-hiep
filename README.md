@@ -54,3 +54,15 @@ Dữ liệu được bảo vệ bằng: xác minh Google ID token ở Vercel; wh
 Dù đặt lịch thành công, web push **không bảo đảm tuyệt đối đã xuất hiện trên màn hình** nếu thiết bị chặn quyền, mất kết nối, hệ điều hành trì hoãn hoặc không còn subscription hợp lệ. Phần mềm này chỉ hỗ trợ nhắc việc, không thay thế nghĩa vụ tự theo dõi hạn KPI.
 
 **Chưa deploy thực tế:** gói này cần người dùng tự nhập ID, URL, khóa dịch vụ và danh sách tài khoản; kiểm thử với vài tài khoản trước khi đưa 140 người vào vận hành.
+
+## Bản cập nhật giao diện v1.1.0 (Desktop + Mobile)
+
+Bổ sung SPEC `docs/SPEC-UI-UX-DESKTOP-MOBILE.md` và hướng dẫn cập nhật giao diện không ảnh hưởng production `docs/HUONG-DAN-CAP-NHAT-GIAO-DIEN-V1.1.md`.
+
+Chỉ thay đổi 3 file `public/index.html`, `public/styles.css`, `public/app.js`. Mọi API, Apps Script, quy tắc OneSignal, Sheets, khóa môi trường và lịch 4 lượt giữ nguyên. Desktop xem form + danh sách cùng lúc; mobile có 2 mục chuyển nhanh và ít cuộn hơn.
+
+## Cập nhật v1.2.0 – YC-001/002/003
+
+Bộ mã này kế thừa v1.1.0 và bổ sung giao diện mobile đã duyệt (Danh sách / Lịch nhắc / Thông báo / Cá nhân, thêm/sửa/xóa), PWA standalone iOS/Android, cùng cơ chế claim và finalize an toàn khi Apps Script gọi OneSignal ngoài LockService. Không đổi cấu trúc Sheet hoặc định danh người dùng.
+
+**Đọc trước khi thay mã:** `docs/CAP-NHAT-PRODUCTION-V1.2.0.md`. Các tài liệu v1.1.0 trong `docs/` được giữ lại làm hồ sơ baseline lịch sử. Không thực hiện lại setup hay sửa API nếu đang chạy ổn định.
