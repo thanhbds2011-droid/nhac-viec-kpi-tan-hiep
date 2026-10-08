@@ -2,6 +2,7 @@
 const $ = (id) => document.getElementById(id);
 const state = { config: null, credential: '', user: null, tasks: [], defaultTime: '07:30', editingId: null, onesignal: null, busy: false, sessionEpoch: 0 };
 const VN = 'vi-VN';
+let activeMobilePane = 'create';
 function pad2(n) { return String(n).padStart(2, '0'); }
 function vnDate(d) { const [y, m, day] = d.split('-'); return `${day}/${m}/${y}`; }
 function dateOffset(iso, daysBefore) {
@@ -10,8 +11,6 @@ function dateOffset(iso, daysBefore) {
   return `${dt.getUTCFullYear()}-${pad2(dt.getUTCMonth()+1)}-${pad2(dt.getUTCDate())}`;
 }
 function nowVNDate() {
-  const v = new Intl.DateTimeFormat('en-CA', {timeZone:'Asia/Ho_Chi_Minh',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
-  // Intl's locale may format as yyyy-mm-dd on modern engines
   const parts = new Intl.DateTimeFormat('en', {timeZone:'Asia/Ho_Chi_Minh',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());
   const obj = Object.fromEntries(parts.map(p => [p.type, p.value]));
   return `${obj.year}-${obj.month}-${obj.day}`;
@@ -35,53 +34,97 @@ async function api(action, data = {}) {
   if (!r.ok || !json.ok) throw new Error(json.error || 'Không thể xử lý yêu cầu.');
   return json;
 }
-function preview() {
-  const date = $('dueDate').value, time = $('taskTime').value;
-  if (!date || !time) return $('datePreview').textContent = 'Chọn ngày và giờ để xem 4 lượt nhắc.';
-  const days = [3, 2, 1, 0].map(n => vnDate(dateOffset(date, n)));
-  $('datePreview').textContent = `Nhận thông báo lúc ${time} trong các ngày ${days.join(' • ')} (giờ Việt Nam). Bao gồm cuối tuần và lễ, Tết.`;
+function showPane(name, scroll = false) {
+  activeMobilePane = name === 'list' ? 'list' : 'create';
+  const create = activeMobilePane === 'create';
+  $('createPane').classList.toggle('is-mobile-active', create);
+  $('listPane').classList.toggle('is-mobile-active', !create);
+  $('tabCreate').classList.toggle('is-active', create);
+  $('tabList').classList.toggle('is-active', !create);
+  $('tabCreate').setAttribute('aria-pressed', String(create));
+  $('tabList').setAttribute('aria-pressed', String(!create));
+  if (scroll && window.matchMedia('(max-width: 720px)').matches) {
+    document.querySelector('.mobile-nav').scrollIntoView({behavior:'smooth', block:'start'});
+  }
 }
-function makeButton(label, title, handler) {
-  const b = document.createElement('button'); b.type='button'; b.textContent=label; b.title=title;
+function preview() {
+  const date = $('dueDate').value, time = $('taskTime').value, box = $('datePreview');
+  box.replaceChildren();
+  box.classList.toggle('has-dates', Boolean(date && time));
+  if (!date || !time) {
+    box.textContent = 'Chọn ngày và giờ để xem các ngày nhắc.';
+    return;
+  }
+  for (const [offset, label] of [[3,'Trước 3 ngày'],[2,'Trước 2 ngày'],[1,'Trước 1 ngày'],[0,'Đúng hạn']]) {
+    const item = document.createElement('div'); item.className = 'preview-chip';
+    if (offset === 0) item.classList.add('is-today');
+    const cap = document.createElement('span'); cap.textContent = label;
+    const day = document.createElement('strong');
+    day.textContent = vnDate(dateOffset(date, offset)).slice(0,5);
+    day.title = vnDate(dateOffset(date, offset)) + ' · ' + time;
+    item.append(cap,day); box.appendChild(item);
+  }
+}
+function makeButton(label, title, handler, className = '') {
+  const b = document.createElement('button'); b.type = 'button';
+  b.textContent = label; b.title = title; b.className = className;
+  b.setAttribute('aria-label', title);
   b.addEventListener('click', handler); return b;
 }
 function renderTasks() {
   const tasks = [...state.tasks].sort((a,b) => a.dueDate.localeCompare(b.dueDate) || a.time.localeCompare(b.time));
-  $('taskCount').textContent = tasks.filter(t=>t.dueDate >= nowVNDate()).length;
+  const currentCount = tasks.filter(t => t.dueDate >= nowVNDate()).length;
+  $('taskCount').textContent = currentCount;
+  $('mobileCount').textContent = currentCount;
   const box = $('taskList'); box.replaceChildren();
-  if (!tasks.length) { const e=document.createElement('div');e.className='empty';e.textContent='Bạn chưa đăng ký công việc. Hãy thêm lịch nhắc đầu tiên.';box.appendChild(e);return; }
+  if (!tasks.length) {
+    const empty = document.createElement('div'); empty.className = 'empty';
+    const message = document.createElement('span'); message.textContent = 'Chưa có công việc nào.';
+    const add = makeButton('＋ Thêm công việc', 'Thêm công việc đầu tiên', () => {
+      resetForm(); showPane('create', true); $('taskTitle').focus();
+    }, 'empty-add');
+    empty.append(message,add); box.appendChild(empty); return;
+  }
   for (const t of tasks) {
-    const item=document.createElement('article');item.className='task';
-    const main=document.createElement('div'); main.style.minWidth='0';
-    const h=document.createElement('h3');h.textContent=t.title;
-    const meta=document.createElement('div');meta.className='task-meta';
-    const d=document.createElement('span');d.textContent='📅 Hạn '+vnDate(t.dueDate);
-    const tm=document.createElement('span');tm.textContent='⏰ '+t.time;
-    const badge=document.createElement('span');badge.className='pill';
-    if(t.dueDate < nowVNDate()) {badge.classList.add('done');badge.textContent='Đã qua hạn';}
-    else if (t.pending > 0) {badge.classList.add('warn');badge.textContent='Đang xếp lịch';}
-    else {badge.classList.add('ok');badge.textContent='Đã đăng ký';}
-    meta.append(d,tm,badge);main.append(h,meta);
-    if (t.warning) {const warn=document.createElement('p');warn.style.margin='10px 0 0';warn.textContent='⚠ '+t.warning;main.appendChild(warn);}
-    const actions=document.createElement('div');actions.className='task-actions';
-    actions.append(makeButton('✎','Sửa',()=>edit(t)),makeButton('✕','Xóa',()=>remove(t)));
-    item.append(main,actions);box.appendChild(item);
+    const item = document.createElement('article'); item.className = 'task';
+    const main = document.createElement('div'); main.className = 'task-content';
+    const title = document.createElement('h3'); title.textContent = t.title;
+    const meta = document.createElement('div'); meta.className = 'task-meta';
+    const day = document.createElement('span'); day.className = 'date'; day.textContent = '📅 ' + vnDate(t.dueDate);
+    const time = document.createElement('span'); time.className = 'time'; time.textContent = '⏰ ' + t.time;
+    const badge = document.createElement('span'); badge.className = 'pill';
+    if (t.dueDate < nowVNDate()) { badge.classList.add('done'); badge.textContent = 'Đã qua hạn'; }
+    else if (t.pending > 0) { badge.classList.add('warn'); badge.textContent = 'Đang xếp lịch'; }
+    else { badge.classList.add('ok'); badge.textContent = 'Đã lưu'; }
+    meta.append(day,time,badge); main.append(title,meta);
+    if (t.warning) {
+      const warning = document.createElement('p'); warning.className = 'task-warning';
+      warning.textContent = '⚠ ' + t.warning; main.appendChild(warning);
+    }
+    const actions = document.createElement('div'); actions.className = 'task-actions';
+    actions.append(
+      makeButton('Sửa', 'Sửa công việc ' + t.title, () => edit(t)),
+      makeButton('Xóa', 'Xóa công việc ' + t.title, () => remove(t), 'delete-btn')
+    );
+    item.append(main,actions); box.appendChild(item);
   }
 }
 function edit(t) {
   state.editingId=t.id; $('taskTitle').value=t.title; $('dueDate').value=t.dueDate; $('taskTime').value=t.time;
   $('formHeading').textContent='Sửa công việc'; $('saveTask').textContent='Lưu thay đổi'; $('cancelEdit').classList.remove('hide');
-  preview(); document.querySelector('.form-panel').scrollIntoView({behavior:'smooth',block:'start'});
+  showPane('create', true); preview();
+  if (!window.matchMedia('(max-width: 720px)').matches) document.querySelector('.form-panel').scrollIntoView({behavior:'smooth',block:'start'});
 }
 function resetForm() {
   state.editingId=null; $('taskForm').reset(); $('dueDate').min=nowVNDate(); $('taskTime').value=state.defaultTime;
-  $('formHeading').textContent='Thêm công việc'; $('saveTask').textContent='＋ Lưu lịch nhắc';
+  $('formHeading').textContent='Thêm công việc'; $('saveTask').textContent='＋ Lưu công việc';
   $('cancelEdit').classList.add('hide');preview();
 }
 function updateData(data) {
   if(Array.isArray(data.tasks)) state.tasks=data.tasks;
   if(typeof data.defaultTime==='string') state.defaultTime=data.defaultTime;
   $('defaultTime').value=state.defaultTime;
+  $('defaultTimeLabel').textContent=state.defaultTime;
   renderTasks();
 }
 async function refresh() {
@@ -95,7 +138,7 @@ async function saveTask(ev) {
   busy(true);
   try {
     const data=await api('save',{id:state.editingId || '',title,dueDate,time});
-    updateData(data);resetForm();notify(data.notice || 'Đã lưu công việc và chuẩn bị lịch nhắc.');
+    updateData(data);resetForm();showPane('list', true);notify(data.notice || 'Đã lưu công việc và chuẩn bị lịch nhắc.');
   } catch(err){notify(err.message,true);} finally {busy(false);}
 }
 async function remove(t) {
@@ -117,9 +160,9 @@ function pushState() {
   const o=state.onesignal;
   const enabled=!!(o && o.Notifications.permission && o.User.PushSubscription.optedIn && o.User.PushSubscription.id);
   $('pushDot').className='status-dot'+(enabled?' on':' off');
-  $('pushStatus').textContent=enabled?'Thiết bị này đã bật thông báo':'Thiết bị này chưa bật thông báo';
-  $('pushDetail').textContent=enabled?'Có thể nhận thông báo ngay cả khi đóng ứng dụng.':
-    'Hãy cho phép web push. Trên iPhone cần thêm ứng dụng vào Màn hình chính.';
+  $('pushStatus').textContent=enabled?'Thông báo đã bật':'Chưa bật thông báo';
+  $('pushDetail').textContent=enabled?'Có thể nhận nhắc việc khi đóng ứng dụng.':
+    'Nhấn Bật thông báo. iPhone: mở từ biểu tượng trên Màn hình chính.';
   $('enablePush').textContent=enabled?'Kiểm tra lại':'Bật thông báo';
 }
 async function initPush(externalId) {
@@ -172,11 +215,11 @@ async function signedIn(response) {
   try {
     const data=await api('load');
     state.user={email:data.email,name:data.name,externalId:data.externalId};
-    $('displayName').textContent=(data.name||data.email||'bạn').split(' ')[0]||'bạn';
+    $('displayName').textContent=(data.name||data.email||'bạn').trim();
     $('accountEmail').textContent=data.email;
     updateData(data);
     $('loginView').classList.add('hide');$('appView').classList.remove('hide');$('signoutBtn').classList.remove('hide');
-    resetForm();
+    resetForm(); showPane('create');
     // Không chặn giao diện khi OneSignal đang kết nối.
     void initPush(data.externalId);
   }catch(err){state.credential='';$('loginHint').textContent=err.message;notify(err.message,true);}
@@ -193,6 +236,8 @@ async function signout() {
   // Không tắt quyền thông báo của trình duyệt; chỉ ngắt tài khoản khỏi thiết bị này.
 }
 async function start() {
+  $('tabCreate').addEventListener('click', () => showPane('create', true));
+  $('tabList').addEventListener('click', () => showPane('list', true));
   $('taskForm').addEventListener('submit',saveTask);
   $('dueDate').addEventListener('change',preview);$('taskTime').addEventListener('change',preview);
   $('cancelEdit').addEventListener('click',resetForm);$('reloadBtn').addEventListener('click',refresh);
