@@ -42,3 +42,11 @@ Kiểm thử tự động không thay thế kiểm thử iPhone/Android/OneSigna
 - Đã thêm action backend `importTasks` để ghi đối chiếu theo lô, giữ tên ngắn và giờ cá nhân, hỗ trợ sự kiện đa thiết bị.
 - **Chưa được nghiệm thu với HTML iCPV thật**, chưa triển khai production và chưa xác minh quyền chia sẻ dữ liệu công vụ.
 - Hướng dẫn chi tiết và rollback: [`docs/CAP-NHAT-V1.4.0-DONG-BO-ICPV.md`](docs/CAP-NHAT-V1.4.0-DONG-BO-ICPV.md).
+
+## Phiên bản 1.4.1 – Tối ưu OneSignal đa tài khoản / đa thiết bị
+
+- Sửa thứ tự xin quyền thông báo ngay trong cú bấm người dùng; kiểm tra trạng thái Subscription và quyền trình duyệt trước khi báo "Đã bật".
+- Hiển thị hướng dẫn chi tiết cho Chrome bị chặn, OneSignal chưa tải xong và iPhone chưa mở PWA từ Màn hình chính.
+- Không thay Apps Script, API, Sheets, OneSignal App ID hoặc tiện ích iCPV; chỉ cập nhật giao diện / logic trình duyệt.
+- **Chưa thể cam kết mọi thiết bị nhận tin nếu quyền bị chặn, browser không hỗ trợ hoặc cấu hình/đường truyền OneSignal gặp lỗi.** Cần thử trên máy thật và kiểm tra dashboard.
+- Hướng dẫn triển khai: [`docs/CAP-NHAT-V1.4.1-THONG-BAO-DA-THIET-BI.md`](docs/CAP-NHAT-V1.4.1-THONG-BAO-DA-THIET-BI.md).

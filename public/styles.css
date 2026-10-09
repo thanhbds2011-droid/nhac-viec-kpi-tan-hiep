@@ -173,3 +173,9 @@ footer{font-size:10px;color:#8499a3;text-align:center;padding:15px 14px 24px}dia
 @media(max-width:720px){.import-inner{padding:14px}.import-inner h2{font-size:17px}}
 
 .import-consent{display:flex;align-items:flex-start;gap:8px;font-size:12px;background:#edf5ff;padding:11px;border-radius:10px}.import-consent input{width:18px;height:18px;flex:0 0 18px;margin-top:1px}.import-consent strong{overflow-wrap:anywhere}
+
+/* v1.4.1: clear per-device push diagnostics; no changes to app layout or task form. */
+.push-help{font-size:12px;line-height:1.6;color:#526a7c;margin:14px 0 8px}
+.push-debug{margin-top:12px;border:1px solid #dde8ee;padding:12px;border-radius:11px;background:#f6fafc;color:#385266;font-size:12px;line-height:1.65}
+.push-debug summary{cursor:pointer;font-weight:700}
+.push-debug p{overflow-wrap:anywhere;margin:8px 0 0}

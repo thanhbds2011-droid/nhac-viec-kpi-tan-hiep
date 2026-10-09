@@ -2,10 +2,9 @@
 const $ = id => document.getElementById(id);
 const state = {
   config:null,credential:'',user:null,tasks:[],defaultTime:'07:30',editingId:null,
-  onesignal:null,busy:false,pushBusy:false,signingOut:false,sessionEpoch:0,filter:'all',
+  onesignal:null,pushError:'',pushBoundAccount:'',busy:false,pushBusy:false,signingOut:false,sessionEpoch:0,filter:'all',
   revision:0,realtime:null,broadcast:null,realtimeEpoch:0,lastVersionCheck:0,queuedChanges:[],checkingVersion:false,sessionToken:'',reconcileAfterBusy:false
 };
-let sdkPromise=null;
 let identityQueue=Promise.resolve();
 let activeMobilePane='list';
 const PANE_IDS={create:'createPane',list:'listPane',schedule:'schedulePane',notifications:'notificationsPane',profile:'profilePane'};
@@ -350,31 +349,72 @@ async function saveDefaultTime(){
   if(state.defaultTime===time){notify('Giờ mặc định không thay đổi.');return;}
   await optimisticMutation('setDefaultTime',{time},()=>{state.defaultTime=time;});
 }
-function pushState(){
-  const o=state.onesignal,enabled=Boolean(o&&o.Notifications.permission&&o.User.PushSubscription.optedIn&&o.User.PushSubscription.id);
-  $('pushDot').className='status-dot '+(enabled?'on':'off');
-  $('pushStatus').textContent=enabled?'Thông báo đã bật':'Chưa bật thông báo';
-  $('pushDetail').textContent=enabled?'Thiết bị đã đăng ký nhận thông báo.':'iPhone: mở từ biểu tượng ở Màn hình chính để cấp quyền.';
-  $('enablePush').textContent=enabled?'Kiểm tra lại':'Bật thông báo';
+// V1.4.1: Device-specific push diagnostics. Permission is never shared between browsers.
+function pushDeviceIssue(){
+  if(!window.isSecureContext)return 'Cần mở ứng dụng qua địa chỉ HTTPS chính thức.';
+  const ua=String(navigator.userAgent||'');
+  const ios=/iPhone|iPad|iPod/i.test(ua) || (/Macintosh/i.test(ua)&&navigator.maxTouchPoints>1);
+  const standalone=Boolean(navigator.standalone)||Boolean(window.matchMedia?.('(display-mode: standalone)')?.matches);
+  if(ios&&!standalone)return 'iPhone/iPad: mở bằng Safari → Chia sẻ → Thêm vào Màn hình chính; sau đó mở từ biểu tượng đã cài và bấm Bật thông báo. Yêu cầu iOS/iPadOS 16.4 trở lên.';
+  if(!('Notification' in window)||!('serviceWorker' in navigator)||!('PushManager' in window))
+    return 'Trình duyệt/thiết bị này chưa hỗ trợ Web Push. Hãy dùng Chrome/Edge phiên bản mới, hoặc iPhone/iPad có ứng dụng ở Màn hình chính (iOS 16.4+).';
+  if(Notification.permission==='denied')
+    return ios?'Thông báo đã bị từ chối. Vào Cài đặt iPhone → Thông báo → Nhắc việc KPI, rồi bật Cho phép thông báo.':
+      'Thông báo đã bị chặn. Nhấn biểu tượng điều chỉnh/ổ khóa bên trái địa chỉ website → Cài đặt trang web → Thông báo → Cho phép, sau đó tải lại trang.';
+  return '';
 }
+function pushSnapshot(){
+  const o=state.onesignal, sub=o?.User?.PushSubscription;
+  const browserPermission=typeof Notification!=='undefined'?Notification.permission:'không hỗ trợ';
+  return {browserPermission, sdk:Boolean(o), account:Boolean(state.user&&state.pushBoundAccount===state.user.externalId),
+    optedIn:Boolean(sub?.optedIn),subscription:Boolean(sub?.id),
+    ready:Boolean(o&&state.user&&state.pushBoundAccount===state.user.externalId&&o.Notifications?.permission&&sub?.optedIn&&sub?.id)};
+}
+function pushState(){
+  if(!state.user)return;
+  const snap=pushSnapshot(),issue=pushDeviceIssue();
+  const detail=issue||state.pushError||(!snap.sdk?'Đang kết nối dịch vụ OneSignal…':
+    !snap.account?'Đang liên kết tài khoản với OneSignal…':
+    snap.browserPermission!=='granted'?'Thiết bị cần được cấp quyền thông báo.':
+    !snap.subscription?'Đã cấp quyền, đang chờ thiết bị đăng ký OneSignal. Bấm Kiểm tra lại nếu trạng thái không đổi.':
+    !snap.optedIn?'Thiết bị đang tắt đăng ký nhận tin. Bấm Bật thông báo để đăng ký lại.':
+    'Thiết bị đã đăng ký OneSignal cho tài khoản Google hiện tại.');
+  $('pushDot').className='status-dot '+(snap.ready?'on':'off');
+  $('pushStatus').textContent=snap.ready?'Thông báo đã bật trên thiết bị này':issue?'Chưa thể nhận thông báo':
+    state.pushError?'Thông báo cần kiểm tra':'Chưa bật thông báo trên thiết bị này';
+  $('pushDetail').textContent=detail;
+  $('enablePush').textContent=snap.ready?'Kiểm tra lại':'Bật thông báo';
+  const diagnostics=$('pushDiagnostics');
+  if(diagnostics){
+    const mark=value=>value?'Có':'Chưa';
+    diagnostics.textContent='Quyền trình duyệt: '+snap.browserPermission+' · OneSignal: '+mark(snap.sdk)+
+      ' · Đúng tài khoản: '+mark(snap.account)+' · Subscription: '+mark(snap.subscription)+
+      ' · Đăng ký nhận tin: '+mark(snap.optedIn)+(state.pushError?' · Lỗi: '+state.pushError:'');
+  }
+}
+let sdkInitPromise=null;
 function sdk(){
-  if(sdkPromise)return sdkPromise;
-  sdkPromise=new Promise((resolve,reject)=>{
-    const timeout=setTimeout(()=>reject(new Error('OneSignal tải quá lâu. Vui lòng mở lại ứng dụng để thử lại.')),15000);
-    const resolved=o=>{clearTimeout(timeout);resolve(o);};
-    const failed=err=>{clearTimeout(timeout);reject(err);};
-    window.OneSignalDeferred=window.OneSignalDeferred||[];
-    window.OneSignalDeferred.push(async o=>{
-      try{
-        await o.init({appId:state.config.oneSignalAppId,serviceWorkerPath:'/OneSignalSDKWorker.js',serviceWorkerParam:{scope:'/'}});
-        state.onesignal=o;
-        o.Notifications.addEventListener('permissionChange',pushState);
-        o.User.PushSubscription.addEventListener('change',pushState);
-        resolved(o);
-      }catch(err){failed(err);}
+  if(state.onesignal)return Promise.resolve(state.onesignal);
+  // A stalled CDN must not permanently cache a rejected Promise. Reuse a single SDK init callback.
+  if(!sdkInitPromise){
+    sdkInitPromise=new Promise((resolve,reject)=>{
+      window.OneSignalDeferred=window.OneSignalDeferred||[];
+      window.OneSignalDeferred.push(async o=>{
+        try{
+          if(!state.config?.oneSignalAppId)throw new Error('Thiếu cấu hình OneSignal App ID. Liên hệ quản trị viên.');
+          await o.init({appId:state.config.oneSignalAppId,serviceWorkerPath:'/OneSignalSDKWorker.js',serviceWorkerParam:{scope:'/'}});
+          state.onesignal=o;
+          o.Notifications.addEventListener('permissionChange',()=>{state.pushError='';pushState();});
+          o.User.PushSubscription.addEventListener('change',()=>{state.pushError='';pushState();});
+          resolve(o);
+        }catch(err){reject(err);}
+      });
     });
+  }
+  return new Promise((resolve,reject)=>{
+    const timeout=setTimeout(()=>reject(new Error('OneSignal chưa tải xong sau 15 giây. Kiểm tra Internet, trình chặn quảng cáo hoặc tường lửa, sau đó thử lại.')),15000);
+    sdkInitPromise.then(o=>{clearTimeout(timeout);resolve(o);},err=>{clearTimeout(timeout);reject(err);});
   });
-  return sdkPromise;
 }
 function queueIdentity(op){
   identityQueue=identityQueue.catch(()=>{}).then(op);
@@ -386,36 +426,79 @@ async function initPush(externalId){
     await queueIdentity(async()=>{
       const o=await sdk();
       if(epoch!==state.sessionEpoch||!state.user)return;
-      await o.login(externalId);
-      if(epoch!==state.sessionEpoch||!state.user)await o.logout();
-      else pushState();
+      if(state.pushBoundAccount!==externalId){
+        await o.login(externalId); // OneSignal v16 links this device to the authorized account.
+      }
+      if(epoch!==state.sessionEpoch||!state.user||state.user.externalId!==externalId){
+        await o.logout();return;
+      }
+      state.pushBoundAccount=externalId;
+      state.pushError='';pushState();
     });
   }catch(err){
-    $('pushStatus').textContent='Chưa kết nối được OneSignal';
-    $('pushDetail').textContent=String(err.message||err);
-    $('pushDot').className='status-dot off';
+    if(epoch===state.sessionEpoch){
+      state.pushBoundAccount='';
+      state.pushError='Không kết nối được OneSignal: '+String(err?.message||err).slice(0,180);
+      pushState();
+    }
+    throw err;
   }
+}
+function waitForSubscription(o,ms=6000){
+  const ready=()=>Boolean(o.User.PushSubscription.id&&o.User.PushSubscription.optedIn);
+  if(ready())return Promise.resolve(true);
+  return new Promise(resolve=>{
+    let timeout;
+    const done=()=>{clearTimeout(timeout);o.User.PushSubscription.removeEventListener('change',changed);resolve(ready());};
+    const changed=()=>{if(ready())done();};
+    o.User.PushSubscription.addEventListener('change',changed);
+    timeout=setTimeout(done,ms);
+    if(ready())done();
+  });
 }
 async function enablePush(){
   if(state.pushBusy||!state.user||state.signingOut)return;
+  const issue=pushDeviceIssue();
+  if(issue){state.pushError=issue;pushState();notify(issue,true);return;}
+  // Browser activation is transient: ask permission directly within the real user click.
+  // Do NOT await SDK login/network before requesting the native permission dialog.
+  const o=state.onesignal;
+  if(!o){
+    state.pushError='OneSignal đang khởi tạo. Đợi vài giây rồi bấm Bật thông báo lần nữa.';
+    pushState();
+    void initPush(state.user.externalId).catch(()=>{});
+    notify(state.pushError,true);return;
+  }
+  if(!o.Notifications.isPushSupported()){
+    state.pushError='OneSignal báo thiết bị không hỗ trợ Web Push; hãy dùng trình duyệt tương thích.';
+    pushState();notify(state.pushError,true);return;
+  }
+  let permissionRequest=null;
+  try{
+    if(!o.Notifications.permission&&Notification.permission==='default')permissionRequest=o.Notifications.requestPermission();
+  }catch(err){state.pushError=String(err?.message||err);pushState();notify(state.pushError,true);return;}
   state.pushBusy=true;
   $('enablePush').disabled=true;$('enablePushAlt').disabled=true;
   $('enablePush').textContent='Đang kiểm tra…';
-  const epoch=state.sessionEpoch;
+  const epoch=state.sessionEpoch,externalId=state.user.externalId;
   try{
-    await initPush(state.user.externalId);
+    if(permissionRequest)await permissionRequest;
     if(epoch!==state.sessionEpoch)throw new Error('Phiên đăng nhập đã thay đổi.');
-    const o=state.onesignal;if(!o)throw new Error('OneSignal chưa sẵn sàng. Vui lòng mở lại ứng dụng.');
-    if(!o.Notifications.isPushSupported())throw new Error('Thiết bị/trình duyệt chưa hỗ trợ web push. iPhone cần iOS 16.4+ và ứng dụng cài ra Màn hình chính.');
-    if(!o.Notifications.permission)await o.Notifications.requestPermission();
-    if(o.Notifications.permission&&!o.User.PushSubscription.optedIn)await o.User.PushSubscription.optIn();
-    pushState();
-    if(o.Notifications.permission&&o.User.PushSubscription.optedIn){
-      // Only a direct tap triggers this explicit recheck. No polling or fixed delay.
-      const response=await api('sync');updateData(response);
-      notify('Đã yêu cầu kiểm tra lại lịch nhắc.');
-    }else notify('Thiết bị chưa cấp quyền nhận thông báo.',true);
-  }catch(err){notify(err.message,true);}finally{
+    if(Notification.permission==='denied')throw new Error(pushDeviceIssue());
+    if(!o.Notifications.permission)throw new Error('Trình duyệt chưa cấp quyền thông báo. Hãy bấm Cho phép khi có yêu cầu.');
+    await initPush(externalId);
+    if(epoch!==state.sessionEpoch)throw new Error('Phiên đăng nhập đã thay đổi.');
+    if(!o.User.PushSubscription.optedIn)await o.User.PushSubscription.optIn();
+    if(!await waitForSubscription(o))throw new Error('Đã cấp quyền nhưng OneSignal chưa tạo đăng ký thiết bị. Kiểm tra tường lửa, trình chặn hoặc cấu hình Web Push trên OneSignal.');
+    if(epoch!==state.sessionEpoch)throw new Error('Phiên đăng nhập đã thay đổi.');
+    state.pushError='';pushState();
+    // Device registration does not itself prove scheduled pushes are being delivered.
+    const response=await api('sync');updateData(response);
+    notify('Thiết bị đã đăng ký OneSignal. Đã yêu cầu kiểm tra lịch nhắc; hãy thử gửi thông báo kiểm tra từ OneSignal.');
+  }catch(err){
+    if(epoch===state.sessionEpoch){state.pushError=String(err?.message||err);pushState();}
+    notify(String(err?.message||err),true);
+  }finally{
     state.pushBusy=false;$('enablePush').disabled=false;$('enablePushAlt').disabled=false;pushState();
   }
 }
@@ -436,7 +519,8 @@ async function signedIn(response){
     updateData(data);$('loginView').classList.add('hide');$('appView').classList.remove('hide');
     $('signoutBtn').classList.remove('hide');resetForm();showPane('list');
     // Asynchronous login; never block the task list while SDK loads.
-    void initPush(data.externalId);
+    state.pushBoundAccount='';state.pushError='';
+    void initPush(data.externalId).catch(()=>{});
     void connectRealtime();
     // The Chrome extension delivers staged data only after successful Google login.
     window.postMessage({kind:'TAN_HIEP_ICPV_IMPORT_READY_V1'},location.origin);
@@ -448,10 +532,10 @@ async function signout(){
   state.signingOut=true;state.sessionEpoch++;disconnectRealtime();setBusy(true);
   try{
     // Serialize with an in-progress OneSignal.login to prevent cross-account binding.
-    await queueIdentity(async()=>{if(sdkPromise){const o=await sdk();await o.logout();}});
+    await queueIdentity(async()=>{if(sdkInitPromise){const o=await sdk();await o.logout();}});
   }catch(err){notify('Chưa thể ngắt OneSignal khỏi thiết bị. Hãy kiểm tra trạng thái thông báo trước khi dùng tài khoản khác.',true);}
   if(window.google?.accounts?.id)window.google.accounts.id.disableAutoSelect();
-  state.credential='';state.sessionToken='';state.user=null;state.tasks=[];state.editingId=null;
+  state.credential='';state.sessionToken='';state.user=null;state.tasks=[];state.editingId=null;state.pushBoundAccount='';state.pushError='';
   $('appView').classList.add('hide');$('signoutBtn').classList.add('hide');$('loginView').classList.remove('hide');
   $('loginHint').textContent='Bạn đã đăng xuất. Đăng nhập lại để quản lý công việc.';
   state.signingOut=false;setBusy(false);
