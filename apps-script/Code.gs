@@ -1,13 +1,15 @@
 /**
- * NHẮC VIỆC KPI – TÂN HIỆP | production v1.5.0
+ * NHẮC VIỆC KPI – TÂN HIỆP | production v1.6.0
  * Google Sheets Access/State unchanged. Single OneSignal application.
  * Never call OneSignal while holding the shared script lock.
  * Durable claim + idempotency key protects concurrent edits and uncertain responses.
  * Time zone: Asia/Ho_Chi_Minh.
  */
-var SHEET_ACCESS='Access';
+var SHEET_ACCESS='Access'; // Bản gốc giữ lại để sao lưu và quay lại khi cần.
+var SHEET_USERS='Tài khoản';
+var SHEET_DEPARTMENTS='Quản lý Phòng-Khu'; // Không dùng dấu / trong tên tab.
 var SHEET_STATE='State';
-// Optional Access column E: email người quản lý (configured by administrator, never created automatically).
+var ACCOUNT_SCHEMA_KEY='ACCOUNT_SCHEMA'; // LEGACY / VI; mặc định LEGACY.
 var VN_ZONE='Asia/Ho_Chi_Minh';
 var DAYS_AHEAD=7;
 var MAX_ACTIVE=50;
@@ -23,13 +25,146 @@ function setupProject() {
     if(!props.getProperty(k))throw new Error('Chưa đặt Script Property: '+k);
   });
   var ss=SpreadsheetApp.openById(props.getProperty('SHEET_ID'));
-  var a=ss.getSheetByName(SHEET_ACCESS)||ss.insertSheet(SHEET_ACCESS);
+  var a=ss.getSheetByName(isVietnameseSchema_()?SHEET_USERS:SHEET_ACCESS);
+  if(!a){
+    if(isVietnameseSchema_())throw new Error('Không tìm thấy tab Tài khoản. Không tự tạo bảng mới.');
+    a=ss.insertSheet(SHEET_ACCESS); // Giữ tương thích hành vi setupProject v1.5.0 trên hệ thống mới.
+  }
   var s=ss.getSheetByName(SHEET_STATE)||ss.insertSheet(SHEET_STATE);
   if(a.getLastRow()===0)a.appendRow(['Email','Họ tên','Active','Role']);
   if(s.getLastRow()===0)s.appendRow(['Google Sub','Email','JSON State','Updated At']);
   a.setFrozenRows(1);s.setFrozenRows(1);
   if(!ScriptApp.getProjectTriggers().some(function(t){return t.getHandlerFunction()==='syncScheduledNotifications';}))
     ScriptApp.newTrigger('syncScheduledNotifications').timeBased().everyHours(1).create();
+}
+
+/**
+ * Quy trình nâng cấp V1.6.0 chỉ chạy do người quản trị chủ động:
+ * (1) prepareVietnameseAdminSheets, điền mã Phòng/Khu; (2) validateVietnameseAdminSheets;
+ * (3) activateVietnameseAdminSheets. Không bao giờ tự kích hoạt khi deploy.
+ */
+function configureAdminView_(sheet,widths){
+  sheet.setFrozenRows(1);
+  var h=sheet.getRange(1,1,1,widths.length);
+  h.setBackground('#1e3a5f').setFontColor('#ffffff').setFontWeight('bold');
+  widths.forEach(function(w,i){sheet.setColumnWidth(i+1,w);});
+  if(!sheet.getFilter())sheet.getRange(1,1,Math.max(sheet.getLastRow(),2),widths.length).createFilter();
+}
+function prepareVietnameseAdminSheets(){
+  if(isVietnameseSchema_())throw new Error('Bảng tiếng Việt đã kích hoạt. Không chuẩn bị lại.');
+  var ss=book_(),legacy=ss.getSheetByName(SHEET_ACCESS);
+  if(!legacy)throw new Error('Không thấy Access cũ. Dừng chuyển đổi để bảo vệ tài khoản.');
+  if(ss.getSheetByName(SHEET_USERS)||ss.getSheetByName(SHEET_DEPARTMENTS))
+    throw new Error('Đã có tab chuẩn bị. Không ghi đè; hãy kiểm tra và tiếp tục cấu hình hiện có.');
+  var users=ss.insertSheet(SHEET_USERS),dept=ss.insertSheet(SHEET_DEPARTMENTS);
+  var count=Math.max(0,legacy.getLastRow()-1),old=count?legacy.getRange(2,1,count,5).getDisplayValues():[];
+  users.getRange(1,1,1,6).setValues([['Email đăng nhập','Họ và tên','Trạng thái','Vai trò','Mã Phòng/Khu','Email quản lý cũ (đối chiếu)']]);
+  if(old.length){
+    users.getRange(2,1,old.length,6).setValues(old.map(function(r){return [r[0],r[1],enabled_(r[2])?'Hoạt động':'Ngừng hoạt động',roleLabel_(r[3]),'',r[4]||''];}));
+  }
+  dept.getRange(1,1,1,5).setValues([['Mã Phòng/Khu','Tên Phòng/Khu','Email Trưởng phòng/Khu','Email Phó thứ nhất (tùy chọn)','Email Phó thứ hai (tùy chọn)']]);
+  configureAdminView_(users,[270,220,160,190,160,280]);
+  configureAdminView_(dept,[140,250,290,260,260]);
+  users.getRange(2,3,users.getMaxRows()-1,1).setDataValidation(SpreadsheetApp.newDataValidation()
+    .requireValueInList(['Hoạt động','Ngừng hoạt động'],true).setAllowInvalid(false).build());
+  users.getRange(2,4,users.getMaxRows()-1,1).setDataValidation(SpreadsheetApp.newDataValidation()
+    .requireValueInList(['Nhân viên','Phó Trưởng phòng/Khu','Trưởng phòng/Khu','Quản trị viên'],true).setAllowInvalid(false).build());
+  users.getRange(2,5,users.getMaxRows()-1,1).setDataValidation(SpreadsheetApp.newDataValidation()
+    .requireValueInRange(dept.getRange(2,1,dept.getMaxRows()-1,1),true).setAllowInvalid(false).build());
+  users.getRange(1,5).setNote('Nhập đúng mã đã khai báo tại tab Quản lý Phòng-Khu. Không nhập email Trưởng phòng vào đây.');
+  users.getRange(1,6).setNote('Giữ lại email quản lý từ cột E của Access cũ để đối chiếu. Không dùng cột này để gửi thông báo.');
+  if(users.hideColumns)users.hideColumns(6);
+  dept.getRange(1,3).setNote('Một email Trưởng phòng/Khu có thể quản lý tất cả tài khoản cùng mã Phòng/Khu. Email phải có trong tab Tài khoản và có đúng vai trò Trưởng phòng/Khu.');
+  // Không sửa tab State, không tự chuyển chế độ, Access cũ vẫn đang cấp quyền khi chuẩn bị.
+  SpreadsheetApp.flush();
+  return 'Đã tạo tab Tài khoản và Quản lý Phòng-Khu. Access và State còn nguyên. Hãy điền mã đơn vị và kiểm tra trước khi kích hoạt.';
+}
+function roleLabel_(role){
+  var kind=roleKind_(role);
+  return kind==='MANAGER'?'Trưởng phòng/Khu':kind==='VICE'?'Phó Trưởng phòng/Khu':kind==='ADMIN'?'Quản trị viên':kind==='EMPLOYEE'?'Nhân viên':String(role||'');
+}
+function validateVietnameseAdminSheets(){
+  var ss=book_(),u=ss.getSheetByName(SHEET_USERS),d=ss.getSheetByName(SHEET_DEPARTMENTS),problems=[];
+  if(!u||!d)return {ok:false,errors:['Thiếu tab Tài khoản hoặc Quản lý Phòng-Khu. Chạy hàm chuẩn bị trước.']};
+  var users=u.getLastRow()>1?u.getRange(2,1,u.getLastRow()-1,5).getDisplayValues():[];
+  var units=d.getLastRow()>1?d.getRange(2,1,d.getLastRow()-1,5).getDisplayValues():[];
+  var emailPattern=/^[^\s@]+@[^\s@]+\.[^\s@]+$/,byEmail={},byUnit={};
+  users.forEach(function(r,i){
+    if(!r.some(function(v){return String(v).trim();}))return;
+    var email=String(r[0]||'').trim().toLowerCase(),kind=roleKind_(r[3]);
+    if(!emailPattern.test(email))problems.push('Tài khoản dòng '+(i+2)+': email không hợp lệ.');
+    if(byEmail[email])problems.push('Tài khoản dòng '+(i+2)+': email bị trùng.');
+    byEmail[email]={email:email,role:kind,active:enabled_(r[2]),unit:String(r[4]||'').trim()};
+    if(!kind)problems.push('Tài khoản dòng '+(i+2)+': vai trò chưa hợp lệ.');
+    if(['HOAT DONG','NGUNG HOAT DONG'].indexOf(textKey_(r[2]))===-1)
+      problems.push('Tài khoản dòng '+(i+2)+': trạng thái phải là Hoạt động hoặc Ngừng hoạt động.');
+    if(enabled_(r[2])&&kind!=='ADMIN'&&!String(r[4]||'').trim())
+      problems.push('Tài khoản dòng '+(i+2)+': chưa chọn mã Phòng/Khu.');
+  });
+  units.forEach(function(r,i){
+    if(!r.some(function(v){return String(v).trim();}))return;
+    var key=String(r[0]||'').trim(),manager=String(r[2]||'').trim().toLowerCase();
+    if(!key||!String(r[1]||'').trim())problems.push('Phòng/Khu dòng '+(i+2)+': thiếu mã hoặc tên.');
+    if(byUnit[key])problems.push('Phòng/Khu dòng '+(i+2)+': mã Phòng/Khu bị trùng.');
+    byUnit[key]=true;
+    var m=byEmail[manager];
+    if(!m||!m.active||m.role!=='MANAGER'||m.unit!==key)
+      problems.push('Phòng/Khu '+(key||i+2)+': email Trưởng phòng không hợp lệ, chưa kích hoạt hoặc sai đơn vị/vai trò.');
+    [3,4].forEach(function(j){
+      var deputy=String(r[j]||'').trim().toLowerCase();if(!deputy)return;
+      var p=byEmail[deputy];
+      if(!p||!p.active||p.role!=='VICE'||p.unit!==key||deputy===manager)
+        problems.push('Phòng/Khu '+key+': email Phó Trưởng phòng/Khu không hợp lệ.');
+    });
+    if(r[3]&&String(r[3]).trim().toLowerCase()===String(r[4]||'').trim().toLowerCase())
+      problems.push('Phòng/Khu '+key+': trùng email hai Phó Trưởng phòng.');
+  });
+  Object.keys(byEmail).forEach(function(email){
+    var a=byEmail[email];
+    if(a.active&&a.role!=='ADMIN'&&!byUnit[a.unit])problems.push('Tài khoản '+email+': mã Phòng/Khu không tồn tại.');
+  });
+  if(!users.length||!units.length)problems.push('Chưa nhập đủ danh sách tài khoản hoặc Phòng/Khu.');
+  return {ok:problems.length===0,errors:problems,accounts:Object.keys(byEmail).length,units:Object.keys(byUnit).length};
+}
+function activateVietnameseAdminSheets(){
+  return withLock_(function(){
+    if(isVietnameseSchema_())return 'Đã sử dụng giao diện tiếng Việt; không cần kích hoạt lại.';
+    var ss=book_(),check=validateVietnameseAdminSheets();
+    if(!check.ok)throw new Error('Chưa thể kích hoạt. Có '+check.errors.length+' vấn đề: '+check.errors.slice(0,12).join(' | '));
+    PropertiesService.getScriptProperties().setProperty(ACCOUNT_SCHEMA_KEY,'VI');
+    var old=ss.getSheetByName(SHEET_ACCESS);
+    try{if(old&&old.hideSheet)old.hideSheet();}catch(e){console.error('Không ẩn được Access dự phòng:',e);}
+    var state=ss.getSheetByName(SHEET_STATE);
+    try{if(state&&state.getProtections&&state.protect&&state.getProtections(SpreadsheetApp.ProtectionType.SHEET).length===0)
+      state.protect().setDescription('Dữ liệu nhiệm vụ - không chỉnh sửa trực tiếp').setWarningOnly(true);
+    }catch(e){console.error('Không bật được cảnh báo bảo vệ State:',e);}
+    return 'Đã kích hoạt. '+check.accounts+' tài khoản, '+check.units+' Phòng/Khu. Không thay đổi State.';
+  });
+}
+function rollbackVietnameseAdminSheets(){
+  return withLock_(function(){
+    var ss=book_(),old=ss.getSheetByName(SHEET_ACCESS);
+    if(!old)throw new Error('Không tìm thấy Access cũ. Dừng khôi phục.');
+    PropertiesService.getScriptProperties().setProperty(ACCOUNT_SCHEMA_KEY,'LEGACY');
+    if(old.showSheet)old.showSheet();
+    return 'Đã chuyển về cách đọc Access cũ. Các chỉnh sửa chỉ thực hiện trong Tài khoản sau nâng cấp sẽ không tự sao chép về Access.';
+  });
+}
+function inspectVietnameseAdminSheets(){
+  var result=validateVietnameseAdminSheets();
+  var message=result.ok?'Đã hợp lệ: '+result.accounts+' tài khoản và '+result.units+' Phòng/Khu.':
+    'Có '+result.errors.length+' vấn đề cần sửa:\\n'+result.errors.join('\\n');
+  Logger.log(message);
+  try{SpreadsheetApp.getUi().alert('Kiểm tra cấu hình',message,SpreadsheetApp.getUi().ButtonSet.OK);}catch(_e){}
+  return result;
+}
+function onOpen(){
+  // Menu chỉ xuất hiện nếu Apps Script được gắn trực tiếp với Google Sheets.
+  try{SpreadsheetApp.getUi().createMenu('Nhắc việc KPI')
+    .addItem('1. Chuẩn bị bảng tiếng Việt','prepareVietnameseAdminSheets')
+    .addItem('2. Kiểm tra phân quyền','inspectVietnameseAdminSheets')
+    .addItem('3. Kích hoạt phân quyền','activateVietnameseAdminSheets')
+    .addItem('4. Quay lại Access cũ','rollbackVietnameseAdminSheets').addToUi();}catch(_e){}
 }
 
 function jsonOutput_(o){return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON);}
@@ -61,19 +196,57 @@ function withLock_(callback,waitMs){
   if(!lock.tryLock(waitMs===undefined?SCRIPT_LOCK_MS:waitMs))throw fail_('BUSY','Hệ thống đang xử lý nhiều yêu cầu. Vui lòng thử lại.');
   try{return callback();}finally{lock.releaseLock();}
 }
-function accessRows_(ss){
-  var sh=ss.getSheetByName(SHEET_ACCESS);
-  if(!sh||sh.getLastRow()<2)return [];
-  return sh.getRange(2,1,sh.getLastRow()-1,sh.getLastColumn()>=5?5:4).getDisplayValues();
+function textKey_(s){return String(s||'').trim().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/đ/g,'d').replace(/Đ/g,'D').toUpperCase().replace(/[\/-]/g,' ').replace(/\s+/g,' ');}
+function enabled_(s){return ['YES','TRUE','1','CO','ACTIVE','HOAT DONG'].indexOf(textKey_(s))!==-1;}
+function roleKind_(role){
+  var r=textKey_(role);
+  if(['ADMIN','ADMINISTRATOR','QUAN TRI','QUAN TRI VIEN'].indexOf(r)!==-1)return 'ADMIN';
+  if(['VICE_MANAGER','DEPUTY_MANAGER','PHO TRUONG PHONG','PHO TRUONG KHU','PHO TRUONG PHONG KHU','PHO PHONG','PHO KHU'].indexOf(r)!==-1)return 'VICE';
+  if(['MANAGER','LEADER','HEAD','LANH DAO','TRUONG PHONG','TRUONG KHU','TRUONG PHONG KHU'].indexOf(r)!==-1)return 'MANAGER';
+  if(['EMPLOYEE','USER','NHAN VIEN'].indexOf(r)!==-1)return 'EMPLOYEE';
+  return '';
 }
-function enabled_(s){return ['YES','TRUE','1','CÓ','CO','ACTIVE'].indexOf(String(s).trim().toUpperCase())!==-1;}
+function isVietnameseSchema_(){return prop_(ACCOUNT_SCHEMA_KEY)==='VI';}
+function managementRows_(ss){
+  var sh=ss.getSheetByName(SHEET_DEPARTMENTS);
+  return sh&&sh.getLastRow()>1?sh.getRange(2,1,sh.getLastRow()-1,5).getDisplayValues():[];
+}
+function accessRows_(ss){
+  var vietnamese=isVietnameseSchema_(),sh=ss.getSheetByName(vietnamese?SHEET_USERS:SHEET_ACCESS);
+  if(!sh)throw new Error('Không tìm thấy tab tài khoản phù hợp. Vui lòng liên hệ quản trị viên.');
+  if(sh.getLastRow()<2)return [];
+  if(!vietnamese)return sh.getRange(2,1,sh.getLastRow()-1,sh.getLastColumn()>=5?5:4).getDisplayValues();
+  // Trả cùng định dạng Access v1.5.0: email, tên, hoạt động, vai trò, email quản lý, mã phòng.
+  // Không sử dụng email do người dùng tự gửi lên; người nhận chỉ được tra từ cấu hình được kiểm tra.
+  var people=sh.getRange(2,1,sh.getLastRow()-1,5).getDisplayValues();
+  var byEmail={},duplicateEmail={};
+  people.forEach(function(r){
+    var e=String(r[0]||'').trim().toLowerCase();
+    if(!e)return;
+    if(byEmail[e])duplicateEmail[e]=true;
+    byEmail[e]=r;
+  });
+  var managers={},ambiguous={};
+  managementRows_(ss).forEach(function(d){
+    var unit=String(d[0]||'').trim(),email=String(d[2]||'').trim().toLowerCase();
+    if(!unit)return;
+    if(Object.prototype.hasOwnProperty.call(managers,unit)){ambiguous[unit]=true;return;}
+    var m=byEmail[email];
+    // Cấm gửi nếu thiếu tài khoản, bị khóa, sai chức vụ, sai Phòng/Khu hoặc trùng email.
+    managers[unit]=m&&!duplicateEmail[email]&&enabled_(m[2])&&roleKind_(m[3])==='MANAGER'&&String(m[4]||'').trim()===unit?email:'';
+  });
+  return people.map(function(r){
+    var unit=String(r[4]||'').trim(),email=String(r[0]||'').trim().toLowerCase();
+    return [r[0],r[1],duplicateEmail[email]?'Ngừng hoạt động':r[2],r[3],ambiguous[unit]?'':(managers[unit]||''),unit];
+  });
+}
 function checkAccess_(ss,actor){
   var email=String(actor.email).trim().toLowerCase();
   var entries=accessRows_(ss);
   for(var i=0;i<entries.length;i++){
     if(String(entries[i][0]).trim().toLowerCase()!==email)continue;
     if(!enabled_(entries[i][2]))throw fail_('FORBIDDEN','Tài khoản chưa được kích hoạt hoặc đã bị thu hồi quyền.');
-    return {email:email,name:String(entries[i][1]).trim()||String(actor.name||'').slice(0,80)||email,role:String(entries[i][3]||'').trim(),managerEmail:String(entries[i][4]||'').trim().toLowerCase()};
+    return {email:email,name:String(entries[i][1]).trim()||String(actor.name||'').slice(0,80)||email,role:String(entries[i][3]||'').trim(),managerEmail:String(entries[i][4]||'').trim().toLowerCase(),unit:String(entries[i][5]||'').trim()};
   }
   throw fail_('FORBIDDEN','Tài khoản Google này chưa có trong danh sách Access.');
 }
@@ -150,11 +323,11 @@ function requireRevision_(data,p){
     throw fail_('CONFLICT','Dữ liệu đã được thay đổi trên thiết bị khác. Vui lòng đồng bộ trước khi tiếp tục.');
 }
 // YC-008/013: manager and admin access are decided exclusively from Access, not client data.
-function isAdmin_(role){return /^(ADMIN|ADMINISTRATOR|QUAN TRI|QUẢN TRỊ|QUAN TRI VIEN|QUẢN TRỊ VIÊN)$/i.test(String(role||'').trim());}
-function isManagerRole_(role){return isAdmin_(role)||/(TRƯỞNG|TRUONG|MANAGER|LEADER|LÃNH ĐẠO|LANH DAO|HEAD)/i.test(String(role||''));}
+function isAdmin_(role){return roleKind_(role)==='ADMIN';}
+function isManagerRole_(role){return isAdmin_(role)||roleKind_(role)==='MANAGER';} // PHÓ TRƯỞNG không phải Trưởng phòng.
 function findActiveManager_(ss,email){
   if(!email)return null;
-  var entries=accessRows_(ss),match=entries.find(function(r){return String(r[0]||'').trim().toLowerCase()===email&&enabled_(r[2]);});
+  var entries=accessRows_(ss),match=entries.find(function(r){return String(r[0]||'').trim().toLowerCase()===email&&enabled_(r[2])&&roleKind_(r[3])==='MANAGER';});
   return match?{email:email,name:String(match[1]||'').trim()||email}:null;
 }
 function stateRowByEmail_(sh,email){
@@ -220,7 +393,7 @@ function runAction_(req){
     if(dirty)saveState_(sh,item.row,p,info.email);
     var deliveredForManager=false;
     // First manager login creates their State row; deliver queued events on subsequent loads too.
-    if(accessRows_(ss).some(function(r){return String(r[4]||'').trim().toLowerCase()===info.email;})){
+    if(roleKind_(info.role)==='MANAGER'&&accessRows_(ss).some(function(r){return String(r[4]||'').trim().toLowerCase()===info.email&&String(r[0]||'').trim().toLowerCase()!==info.email;})){
       try{deliveredForManager=deliverOutbox_(ss,info.email);var updated=readState_(ss,req.actor,false);if(updated)p=updated.profile;}
       catch(err){console.error('Deliver inbox:',err.message||err);}
     }

@@ -1,6 +1,6 @@
 {
   "name": "nhac-viec-kpi-tan-hiep",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "private": true,
   "description": "Ứng dụng nhắc việc KPI tối giản, Google Login + Apps Script + OneSignal + Vercel",
   "type": "commonjs",

@@ -1,8 +1,10 @@
-# Nhắc việc KPI – Tân Hiệp v1.5.0
+# Nhắc việc KPI – Tân Hiệp v1.6.0
 
 **Bản cập nhật đã CHỐT ngày 09/10/2026.** Giữ nguyên kiến trúc v1.4.1, chỉ bổ sung đồng bộ iCPV chọn lọc, xác nhận hoàn thành khi xóa việc, thông báo cho Trưởng phòng và thống kê quản trị.
 
-**Hướng dẫn bắt buộc trước khi triển khai:** [`docs/TRIEN-KHAI-V1.5.0-CHOT.md`](docs/TRIEN-KHAI-V1.5.0-CHOT.md). Việc gửi thông báo cho Trưởng phòng cần cấu hình quan hệ quản lý trong Access; không tự tạo cột hoặc sửa dữ liệu sản xuất.
+**Hướng dẫn nâng cấp YC-015/YC-016:** [`docs/TRIEN-KHAI-V1.6.0-PHONG-KHU.md`](docs/TRIEN-KHAI-V1.6.0-PHONG-KHU.md). Phải chạy `prepareVietnameseAdminSheets`, cấu hình mã Phòng/Khu và kiểm tra trước khi chạy `activateVietnameseAdminSheets`; deploy code không tự thay đổi quyền hay dữ liệu.
+
+**Hướng dẫn bản trước v1.5.0:** [`docs/TRIEN-KHAI-V1.5.0-CHOT.md`](docs/TRIEN-KHAI-V1.5.0-CHOT.md). Việc gửi thông báo cho Trưởng phòng cần cấu hình quan hệ quản lý trong Access; không tự tạo cột hoặc sửa dữ liệu sản xuất.
 
 ---
 
