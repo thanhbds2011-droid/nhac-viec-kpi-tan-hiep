@@ -155,3 +155,21 @@ footer{font-size:10px;color:#8499a3;text-align:center;padding:15px 14px 24px}dia
 /* YC-005: quiet synchronization status; preserve existing responsive layout. */
 .sync-status{font-size:11px;color:#516779;max-width:155px;line-height:1.2;margin-left:auto;white-space:normal;text-align:right}
 @media(max-width:720px){.sync-status{font-size:10px;max-width:120px}}
+
+/* YC-006 – Preview prior to submitting data obtained with consent. */
+.import-dialog{width:min(620px,calc(100vw - 20px));max-height:90dvh;border:0;border-radius:18px;padding:0;box-shadow:0 18px 64px rgba(5,30,70,.27)}
+.import-dialog::backdrop{background:rgba(12,25,50,.55)}
+.import-inner{padding:20px;display:flex;flex-direction:column;gap:12px;max-height:89dvh}
+.import-inner h2{margin:0;font-size:19px;color:#153b71}
+.import-inner p{font-size:12px;line-height:1.5;margin:0}
+.import-list{overflow-y:auto;display:grid;gap:9px;min-height:40px;max-height:53dvh;padding:4px}
+.import-row{display:flex;gap:9px;align-items:flex-start;border:1px solid #e0e8f4;padding:10px;border-radius:10px}
+.import-row>input{flex:0 0 20px;min-width:20px;min-height:20px;margin-top:8px}
+.import-row>div{display:flex;gap:5px;flex:1;min-width:0;flex-direction:column}
+.import-row input[type=text]{min-width:0;width:100%;font-size:12px;padding:8px;border:1px solid #c9d7e9;border-radius:8px}
+.import-row small{color:#5a7291}
+.import-disclaimer{color:#805b18}
+.import-inner .form-actions{justify-content:flex-end;margin-top:3px}
+@media(max-width:720px){.import-inner{padding:14px}.import-inner h2{font-size:17px}}
+
+.import-consent{display:flex;align-items:flex-start;gap:8px;font-size:12px;background:#edf5ff;padding:11px;border-radius:10px}.import-consent input{width:18px;height:18px;flex:0 0 18px;margin-top:1px}.import-consent strong{overflow-wrap:anywhere}

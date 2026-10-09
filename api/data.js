@@ -16,9 +16,9 @@ module.exports = async (req, res) => {
   }
   try {
     const reqSize = Number(req.headers['content-length'] || 0);
-    if (reqSize > 14000) return reply(res, 413, { error: 'Dữ liệu yêu cầu quá lớn.' });
+    if (reqSize > 38000) return reply(res, 413, { error: 'Dữ liệu yêu cầu quá lớn.' });
     const { credential, sessionToken, action, data } = req.body || {};
-    if (!['load', 'save', 'remove', 'setDefaultTime', 'sync', 'status'].includes(action)) {
+    if (!['load', 'save', 'remove', 'setDefaultTime', 'sync', 'status', 'importTasks'].includes(action)) {
       return reply(res, 400, { error: 'Hành động không hợp lệ.' });
     }
     const p = await identify({credential,sessionToken},process.env);

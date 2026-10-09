@@ -13,10 +13,10 @@
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
-  <link rel="stylesheet" href="/styles.css?v=1.3.0" />
+  <link rel="stylesheet" href="/styles.css?v=1.4.0" />
   <script defer src="https://accounts.google.com/gsi/client"></script>
   <script defer src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js"></script>
-  <script defer src="/app.js?v=1.3.0"></script>
+  <script defer src="/app.js?v=1.4.0"></script>
 </head>
 <body>
 <div class="shell">
@@ -110,7 +110,7 @@
             <div><strong id="profileName">Viên chức</strong><p id="profileEmail"></p></div></div>
           <button type="button" class="menu-row" id="profileDefaultTime">⚙️ <span>Thay đổi giờ mặc định</span><span>›</span></button>
           <button type="button" class="menu-row" id="profilePush">🔔 <span>Trạng thái thông báo</span><span>›</span></button>
-          <p class="profile-version">Phiên bản 1.2.0 · Nhắc việc KPI – Tân Hiệp</p>
+          <p class="profile-version">Phiên bản 1.4.0 · Nhắc việc KPI – Tân Hiệp</p>
           <button type="button" class="profile-signout" id="profileSignout">Đăng xuất</button>
           <p class="install-help" id="installHelp">iPhone: Trong Safari, chọn Chia sẻ → Thêm vào Màn hình chính. Android: chọn Cài đặt ứng dụng / Thêm vào Màn hình chính.</p>
         </section>
@@ -137,5 +137,15 @@
   <div class="dialog-actions"><button type="submit" value="cancel" class="secondary">Giữ lại</button>
     <button type="submit" value="confirm" class="danger">Xóa công việc</button></div>
 </form></dialog>
+<dialog id="importDialog" class="import-dialog" aria-labelledby="importHeading">
+  <div class="import-inner">
+    <h2 id="importHeading">Đồng bộ nhiệm vụ từ iCPV</h2>
+    <p id="importInfo"></p>
+    <div id="importPreview" class="import-list"></div>
+    <label class="import-consent"><input type="checkbox" id="importAccountConfirm"> Tôi xác nhận đây là nhiệm vụ thuộc chính tài khoản Nhắc việc <strong id="importAccount"></strong> và được phép chuyển dữ liệu.</label>
+    <p class="import-disclaimer">Chỉ nhập các nhiệm vụ bạn được phép chuyển dữ liệu. Công việc được đối chiếu theo dấu vân tay tên gốc; khi tên gốc trên iCPV bị sửa, cần rà soát tránh trùng.</p>
+    <div class="form-actions"><button id="importCancel" type="button" class="secondary">Hủy</button><button id="importApply" type="button" class="primary">Xác nhận đồng bộ</button></div>
+  </div>
+</dialog>
 </body>
 </html>

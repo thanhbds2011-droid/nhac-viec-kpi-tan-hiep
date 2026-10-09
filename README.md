@@ -35,3 +35,10 @@ npm test
 ```
 
 Kiểm thử tự động không thay thế kiểm thử iPhone/Android/OneSignal/Ably thực tế. Không có dữ liệu production nào được điều chỉnh trong gói mã nguồn.
+
+## Phiên bản 1.4.0 – YC-006: Tiện ích Chrome đồng bộ tên/hạn iCPV
+
+- Đã thêm `chrome-extension/` (Manifest V3) để **người dùng chủ động đọc bảng** nhiệm vụ đang hiển thị trên iCPV, chuyển bản xem trước sang Nhắc việc đã đăng nhập rồi xác nhận.
+- Đã thêm action backend `importTasks` để ghi đối chiếu theo lô, giữ tên ngắn và giờ cá nhân, hỗ trợ sự kiện đa thiết bị.
+- **Chưa được nghiệm thu với HTML iCPV thật**, chưa triển khai production và chưa xác minh quyền chia sẻ dữ liệu công vụ.
+- Hướng dẫn chi tiết và rollback: [`docs/CAP-NHAT-V1.4.0-DONG-BO-ICPV.md`](docs/CAP-NHAT-V1.4.0-DONG-BO-ICPV.md).

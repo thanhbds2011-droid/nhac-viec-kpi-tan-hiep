@@ -1,5 +1,5 @@
 /**
- * NHẮC VIỆC KPI – TÂN HIỆP | production v1.3.0
+ * NHẮC VIỆC KPI – TÂN HIỆP | production v1.4.0
  * Google Sheets Access/State unchanged. Single OneSignal application.
  * Never call OneSignal while holding the shared script lock.
  * Durable claim + idempotency key protects concurrent edits and uncertain responses.
@@ -193,6 +193,62 @@ function runAction_(req){
     var urgent=task.slots.some(function(slot){return slot.at>Date.now()+30000&&slot.at<=Date.now()+90*60000;});
     return {view:view,sync:true,urgentSync:urgent,changed:true,change:{type:'upsert',task:changedTask}};
   }
+  if(action==='importTasks'){
+    requireRevision_(d,p);
+    if(!Array.isArray(d.items)||!d.items.length||d.items.length>30)
+      throw fail_('BAD_REQUEST','Mỗi lần chỉ nhập từ 1 đến 30 nhiệm vụ.');
+    var seen={},summary={added:0,updated:0,unchanged:0,skipped:0,notes:[]},changedTasks=[];
+    var today=vnToday_(),now=Date.now(),maxDue=now+3*366*DAY_MS;
+    for(var index=0;index<d.items.length;index++){
+      var source=d.items[index]||{},key=String(source.sourceKey||'');
+      var title=String(source.title||'').trim(),due=String(source.dueDate||'');
+      var note=function(reason){summary.skipped++;summary.notes.push('Dòng '+(index+1)+': '+reason);};
+      if(!/^icpv:[a-f0-9]{64}$/.test(key)||!title||title.length>90||!validDay_(due)){
+        note('Thông tin nhiệm vụ không hợp lệ.');continue;
+      }
+      if(seen[key]){note('Tên nhiệm vụ bị trùng trong lần nhập.');continue;}
+      seen[key]=true;
+      // Deletion is deliberate: importing the same source never silently restores it.
+      var matched=p.tasks.find(function(t){return t.source==='icpv'&&t.sourceKey===key;});
+      if(matched&&matched.deleted){note('Nhiệm vụ đã được người dùng xóa trong Nhắc việc.');continue;}
+      var time=matched?matched.time:p.defaultTime;
+      if(due<today||dateMs_(due,time,0)<=now+30000||dateMs_(due,time,0)>maxDue){
+        note('Hạn đã qua hoặc vượt giới hạn ba năm.');continue;
+      }
+      if(matched){
+        if(matched.dueDate===due){summary.unchanged++;continue;}
+        prepareCancellation_(p,matched);
+        matched.dueDate=due;matched.slots=slotsFor_(matched);matched.lastError='';
+        // Preserve any short personal display title and individually chosen reminder hour.
+        summary.updated++;changedTasks.push(matched);
+        continue;
+      }
+      // Never automatically claim a manually created task with the same title.
+      if(p.tasks.some(function(t){return !t.deleted&&t.title.toLowerCase()===title.toLowerCase();})){
+        note('Đã có công việc cùng tên; cần đối chiếu thủ công.');continue;
+      }
+      if(p.tasks.filter(function(t){return !t.deleted&&t.dueDate>=today;}).length>=MAX_ACTIVE){
+        note('Đã đạt giới hạn 50 công việc chưa quá hạn.');continue;
+      }
+      var task={id:Utilities.getUuid(),source:'icpv',sourceKey:key,title:title,
+        dueDate:due,time:time,deleted:false,lastError:''};
+      task.slots=slotsFor_(task);p.tasks.push(task);
+      summary.added++;changedTasks.push(task);
+    }
+    if(changedTasks.length){
+      bumpRevision_(p);saveState_(sh,item.row,p,info.email);
+    }else if(dirty)saveState_(sh,item.row,p,info.email);
+    var importView=publicView_(p,info,req.actor.externalId);
+    importView.importSummary=summary;
+    importView.notice='Đồng bộ: '+summary.added+' mới, '+summary.updated+' thay hạn, '+summary.unchanged+' không đổi, '+summary.skipped+' bỏ qua.';
+    // Do not call OneSignal while answering a multi-item import: browser requests
+    // one separate sync; the hourly trigger remains the durable fallback.
+    return {view:importView,sync:changedTasks.length>0,urgentSync:false,
+      changed:changedTasks.length>0,change:changedTasks.length?{
+        type:'importBatch',tasks:importView.tasks.filter(function(t){
+          return changedTasks.some(function(c){return c.id===t.id;});
+        })}:null};
+  }
   if(action==='remove'){
     requireRevision_(d,p);
     var target=p.tasks.find(function(t){return t.id===d.id&&!t.deleted;});
@@ -329,7 +385,7 @@ function syncAccount_(actor,maxCalls,force){
 }
 function doPost(e){
   try{
-    if(!e||!e.postData||!e.postData.contents||e.postData.contents.length>16000)
+    if(!e||!e.postData||!e.postData.contents||e.postData.contents.length>62000)
       throw fail_('BAD_REQUEST','Yêu cầu trống hoặc quá lớn.');
     var envelope=JSON.parse(e.postData.contents),request;
     var result=withLock_(function(){

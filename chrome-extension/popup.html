@@ -1,0 +1,12 @@
+<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Đồng bộ iCPV</title><link rel="stylesheet" href="popup.css"></head><body>
+<header><img src="icons/icon-48.png" width="35" height="35" alt=""><div><strong>Đồng bộ iCPV</strong><small>Nhắc việc KPI · Tân Hiệp</small></div></header>
+<main>
+<p>1. Mở <b>Quản lý nhiệm vụ</b> trên iCPV, chọn danh sách cần đồng bộ.</p>
+<label class="agree"><input id="approved" type="checkbox"> Tôi xác nhận được phép chuyển tên và hạn nhiệm vụ từ iCPV sang Nhắc việc Tân Hiệp.</label>
+<div id="site" class="subtle"></div>
+<button type="button" id="scan" disabled>2. Lấy nhiệm vụ trên trang đang mở</button>
+<div id="result" role="status" aria-live="polite"></div>
+<div id="preview" class="preview"></div>
+<button type="button" id="send" class="send" disabled>3. Mở Nhắc việc để duyệt và đồng bộ</button>
+<p class="foot">Chỉ đọc bảng đang hiển thị. Không đọc mật khẩu/cookie, không gọi API iCPV; không tự lưu dữ liệu trước khi bạn xác nhận trong Nhắc việc.</p>
+</main><script src="popup.js"></script></body></html>

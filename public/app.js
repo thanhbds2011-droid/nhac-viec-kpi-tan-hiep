@@ -172,6 +172,9 @@ function applyChange(event){
   const change=event.change;
   if(change.type==='upsert'&&change.task&&typeof change.task.id==='string'){
     state.tasks=state.tasks.filter(t=>t.id!==change.task.id).concat([change.task]);
+  }else if(change.type==='importBatch'&&Array.isArray(change.tasks)){
+    const ids=new Set(change.tasks.map(t=>t.id));
+    state.tasks=state.tasks.filter(t=>!ids.has(t.id)).concat(change.tasks);
   }else if(change.type==='remove'&&typeof change.id==='string'){
     state.tasks=state.tasks.filter(t=>t.id!==change.id);
     if(state.editingId===change.id){resetForm();showPane('list');}
@@ -435,6 +438,8 @@ async function signedIn(response){
     // Asynchronous login; never block the task list while SDK loads.
     void initPush(data.externalId);
     void connectRealtime();
+    // The Chrome extension delivers staged data only after successful Google login.
+    window.postMessage({kind:'TAN_HIEP_ICPV_IMPORT_READY_V1'},location.origin);
   }catch(err){state.credential='';state.sessionToken='';$('loginHint').textContent=err.message;notify(err.message,true);}
   finally{setBusy(false);}
 }
@@ -459,6 +464,9 @@ function setFilter(name){
   });renderTasks();
 }
 async function start(){
+  window.addEventListener('message',receiveImportFromExtension);
+  $('importCancel').addEventListener('click',()=>{pendingImport=null;$('importDialog').close();});
+  $('importApply').addEventListener('click',()=>void confirmImport());
   Object.entries(NAV_IDS).forEach(([pane,id])=>$(id).addEventListener('click',()=>showPane(pane,true)));
   $('tabCreate').addEventListener('click',()=>{resetForm();showPane('create',true);});
   $('taskForm').addEventListener('submit',saveTask);
@@ -492,5 +500,71 @@ async function start(){
     window.google.accounts.id.renderButton($('googleButton'),{theme:'outline',size:'large',text:'signin_with',shape:'pill',width:300});
     $('loginHint').textContent='Chỉ dành cho tài khoản đã được cấp quyền.';
   }catch(err){$('loginHint').textContent=err.message;notify(err.message,true);}
+}
+// YC-006: In-memory import staging, never accept credentials or write without review.
+let pendingImport=null;
+function receiveImportFromExtension(event){
+  if(event.source!==window||event.origin!==location.origin||!state.user)return;
+  const data=event.data;
+  if(!data||data.kind!=='TAN_HIEP_ICPV_IMPORT_PAYLOAD_V1')return;
+  if(!Array.isArray(data.items)||data.items.length<1||data.items.length>30){
+    notify('Danh sách không hợp lệ hoặc quá 30 nhiệm vụ.',true);return;
+  }
+  const seen=new Set(),clean=[];
+  for(const input of data.items){
+    if(!input||!/^icpv:[a-f0-9]{64}$/.test(input.sourceKey||'')||
+       !/^\d{4}-\d{2}-\d{2}$/.test(input.dueDate||'')||seen.has(input.sourceKey))continue;
+    seen.add(input.sourceKey);
+    clean.push({sourceKey:input.sourceKey,title:String(input.title||'').slice(0,90).trim(),dueDate:input.dueDate});
+  }
+  if(!clean.length){notify('Không có nhiệm vụ hợp lệ để xem trước.',true);return;}
+  pendingImport=clean;
+  $('importAccount').textContent=state.user.email;
+  $('importAccountConfirm').checked=false;
+  const list=$('importPreview');list.replaceChildren();
+  for(let i=0;i<clean.length;i++){
+    const t=clean[i],row=document.createElement('label');row.className='import-row';
+    const check=document.createElement('input');check.type='checkbox';check.checked=true;
+    check.dataset.index=String(i);
+    const content=document.createElement('div'),title=document.createElement('input');
+    title.type='text';title.maxLength=90;title.required=true;title.value=t.title;
+    title.setAttribute('aria-label','Tên ngắn gọn nhiệm vụ '+(i+1));
+    title.addEventListener('click',e=>e.stopPropagation());
+    const deadline=document.createElement('small');deadline.textContent='Hạn: '+vnDate(t.dueDate);
+    content.append(title,deadline);row.append(check,content);list.append(row);
+  }
+  $('importInfo').textContent='Đã đọc '+clean.length+' nhiệm vụ từ danh sách đang hiển thị. Chỉ nhiệm vụ được chọn mới được gửi lên Nhắc việc. Hãy kiểm tra tên và ngày hạn.';
+  $('importDialog').showModal();
+}
+async function confirmImport(){
+  if(!pendingImport||state.busy)return;
+  if(!$('importAccountConfirm').checked){notify('Vui lòng xác nhận tài khoản và quyền sử dụng dữ liệu.',true);return;}
+  const items=[];
+  for(const row of $('importPreview').querySelectorAll('.import-row')){
+    const check=row.querySelector('input[type=checkbox]');if(!check.checked)continue;
+    const original=pendingImport[Number(check.dataset.index)];
+    const title=row.querySelector('input[type=text]').value.trim();
+    if(!title){notify('Tên công việc không được để trống.',true);return;}
+    items.push({...original,title});
+  }
+  if(!items.length){notify('Bạn chưa chọn nhiệm vụ nào.',true);return;}
+  if(items.length>30){notify('Tối đa 30 nhiệm vụ mỗi lần.',true);return;}
+  const button=$('importApply');button.disabled=true;
+  const old=button.textContent;button.textContent='Đang đối chiếu…';setBusy(true);
+  let checkAfterFailure=false;
+  try{
+    const r=await api('importTasks',{items,expectedRevision:state.revision});
+    updateData(r);
+    if(r.change)emitTabChange({revision:r.revision,change:r.change});
+    if(r.needsSync)kickOneSignalSync();
+    const summary=r.importSummary||{};
+    $('importDialog').close();pendingImport=null;
+    const notes=Array.isArray(summary.notes)?summary.notes:[];
+    notify(r.notice||'Đã đồng bộ.');
+    if(notes.length)window.alert('Các dòng chưa được nhập:\n'+notes.slice(0,20).join('\n'));
+    showPane('list',true);
+  }catch(err){notify(err.message,true);checkAfterFailure=true;}
+  finally{setBusy(false);button.disabled=false;button.textContent=old;flushChanges();
+    if(checkAfterFailure)void checkRevision(true);}
 }
 start();
