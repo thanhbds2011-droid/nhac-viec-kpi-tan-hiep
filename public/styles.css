@@ -151,3 +151,7 @@ footer{font-size:10px;color:#8499a3;text-align:center;padding:15px 14px 24px}dia
   .task h3{font-size:13px}
 }
 @media(prefers-reduced-motion:reduce){.fab,.bottom-nav-button{transition:none}}
+
+/* YC-005: quiet synchronization status; preserve existing responsive layout. */
+.sync-status{font-size:11px;color:#516779;max-width:155px;line-height:1.2;margin-left:auto;white-space:normal;text-align:right}
+@media(max-width:720px){.sync-status{font-size:10px;max-width:120px}}

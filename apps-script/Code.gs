@@ -1,5 +1,5 @@
 /**
- * NHẮC VIỆC KPI – TÂN HIỆP | production v1.2.0
+ * NHẮC VIỆC KPI – TÂN HIỆP | production v1.3.0
  * Google Sheets Access/State unchanged. Single OneSignal application.
  * Never call OneSignal while holding the shared script lock.
  * Durable claim + idempotency key protects concurrent edits and uncertain responses.
@@ -72,21 +72,23 @@ function checkAccess_(ss,actor){
   for(var i=0;i<entries.length;i++){
     if(String(entries[i][0]).trim().toLowerCase()!==email)continue;
     if(!enabled_(entries[i][2]))throw fail_('FORBIDDEN','Tài khoản chưa được kích hoạt hoặc đã bị thu hồi quyền.');
-    return {email:email,name:String(entries[i][1]).trim()||String(actor.name||'').slice(0,80)||email};
+    return {email:email,name:String(entries[i][1]).trim()||String(actor.name||'').slice(0,80)||email,role:String(entries[i][3]||'').trim()};
   }
   throw fail_('FORBIDDEN','Tài khoản Google này chưa có trong danh sách Access.');
 }
 function stateSheet_(ss){var sh=ss.getSheetByName(SHEET_STATE);if(!sh)throw new Error('Chưa chạy setupProject.');return sh;}
-function newState_(){return {defaultTime:'07:30',externalId:'',tasks:[],cancellations:[]};}
+function newState_(){return {defaultTime:'07:30',externalId:'',tasks:[],cancellations:[],revision:0};}
 function normalizeState_(value){
   if(!Array.isArray(value.tasks))value.tasks=[];
   if(!Array.isArray(value.cancellations))value.cancellations=[];
   if(!validTime_(value.defaultTime))value.defaultTime='07:30';
+  if(!Number.isSafeInteger(value.revision)||value.revision<0)value.revision=0;
   return value;
 }
 function readState_(ss,actor,create){
   var sh=stateSheet_(ss);
-  var found=sh.getRange('A:A').createTextFinder(String(actor.subject)).matchEntireCell(true).findNext();
+  var last=sh.getLastRow();
+  var found=last<2?null:sh.getRange(2,1,last-1,1).createTextFinder(String(actor.subject)).matchEntireCell(true).findNext();
   if(!found){
     if(!create)return null;
     var row=sh.getLastRow()+1,fresh=newState_();
@@ -113,7 +115,7 @@ function vnToday_(){return Utilities.formatDate(new Date(),VN_ZONE,'yyyy-MM-dd')
 function vnDay_(s){return s.slice(8,10)+'/'+s.slice(5,7)+'/'+s.slice(0,4);}
 function publicView_(profile,info,ext){
   var now=Date.now(),horizon=now+DAYS_AHEAD*DAY_MS;
-  return {email:info.email,name:info.name,externalId:ext,defaultTime:profile.defaultTime,
+  return {email:info.email,name:info.name,externalId:ext,defaultTime:profile.defaultTime,revision:profile.revision,
     tasks:profile.tasks.filter(function(t){return !t.deleted;}).map(function(t){
       var pending=(t.slots||[]).filter(function(s){return !s.id&&s.at>now&&s.at<=horizon;}).length;
       return {id:t.id,title:t.title,dueDate:t.dueDate,time:t.time,pending:pending,
@@ -132,26 +134,42 @@ function prepareCancellation_(profile,task){
   });
   task.slots=[];task.lastError='';
 }
+/* Only user-facing mutations increment revision. OneSignal internal bookkeeping does not. */
+function bumpRevision_(p){p.revision+=1;}
+function requireRevision_(data,p){
+  // Older v1.2 browser sessions may temporarily omit the field during rollout.
+  if(data.expectedRevision===undefined)return;
+  if(!Number.isSafeInteger(data.expectedRevision)||data.expectedRevision!==p.revision)
+    throw fail_('CONFLICT','Dữ liệu đã được thay đổi trên thiết bị khác. Vui lòng đồng bộ trước khi tiếp tục.');
+}
 function runAction_(req){
-  var ss=book_(),info=checkAccess_(ss,req.actor),item=readState_(ss,req.actor,true);
-  var p=item.profile,sh=stateSheet_(ss),action=String(req.action||''),d=req.data||{};
-  var dirty=false;
+  var action=String(req.action||''),d=req.data||{};
+  var ss=book_(),info=checkAccess_(ss,req.actor);
+  // Token refresh: verify Access without loading or creating a State row.
+  if(action==='authorize')return {view:{authorized:true},sync:false,changed:false};
+  var item=readState_(ss,req.actor,action!=='status');
+  if(action==='status')return {view:{revision:item?item.profile.revision:0},sync:false,changed:false};
+  var p=item.profile,sh=stateSheet_(ss),dirty=false;
   if(p.externalId!==req.actor.externalId){p.externalId=req.actor.externalId;dirty=true;}
   if(action==='load'||action==='sync'){
     if(dirty)saveState_(sh,item.row,p,info.email);
-    return {view:publicView_(p,info,req.actor.externalId),sync:action==='sync'};
+    return {view:publicView_(p,info,req.actor.externalId),sync:action==='sync',changed:false};
   }
   if(action==='setDefaultTime'){
     if(!validTime_(d.time))throw fail_('BAD_REQUEST','Giờ không hợp lệ.');
-    if(p.defaultTime!==d.time){p.defaultTime=d.time;dirty=true;}
+    requireRevision_(d,p);
+    var timeChanged=p.defaultTime!==d.time;
+    if(timeChanged){p.defaultTime=d.time;dirty=true;bumpRevision_(p);}
     if(dirty)saveState_(sh,item.row,p,info.email);
-    return {view:publicView_(p,info,req.actor.externalId),sync:false};
+    return {view:publicView_(p,info,req.actor.externalId),sync:false,changed:timeChanged,
+      change:timeChanged?{type:'defaultTime',time:p.defaultTime}:null};
   }
   if(action==='save'){
     var title=String(d.title||'').trim(),due=String(d.dueDate||''),time=String(d.time||'');
     if(!title||title.length>90||!validDay_(due)||!validTime_(time))throw fail_('BAD_REQUEST','Kiểm tra lại tên, ngày và giờ công việc.');
     if(due<vnToday_()||dateMs_(due,time,0)<=Date.now()+30000)throw fail_('BAD_REQUEST','Ngày/giờ đến hạn phải còn ở tương lai.');
     if(dateMs_(due,time,0)>Date.now()+3*366*DAY_MS)throw fail_('BAD_REQUEST','Chỉ được đăng ký tối đa 3 năm trong tương lai.');
+    requireRevision_(d,p);
     var existing=d.id?p.tasks.find(function(t){return t.id===d.id&&!t.deleted;}):null;
     if(d.id&&!existing)throw fail_('BAD_REQUEST','Không tìm thấy công việc cần sửa.');
     if(p.tasks.some(function(t){return !t.deleted&&t.id!==(existing&&existing.id)&&
@@ -161,25 +179,30 @@ function runAction_(req){
       throw fail_('BAD_REQUEST','Tài khoản đang có quá nhiều lịch nhắc (50). Hãy xóa những lịch không cần thiết.');
     if(existing&&existing.title===title&&existing.dueDate===due&&existing.time===time){
       if(dirty)saveState_(sh,item.row,p,info.email);
-      return {view:publicView_(p,info,req.actor.externalId),sync:false};
+      return {view:publicView_(p,info,req.actor.externalId),sync:false,changed:false};
     }
     if(existing)prepareCancellation_(p,existing);
     var task=existing||{id:Utilities.getUuid()};
     task.title=title;task.dueDate=due;task.time=time;task.deleted=false;task.lastError='';task.slots=slotsFor_(task);
     if(!existing)p.tasks.push(task);
+    bumpRevision_(p);
     saveState_(sh,item.row,p,info.email);
     var view=publicView_(p,info,req.actor.externalId);
     view.notice='Đã lưu công việc. Lịch nhắc được xử lý tự động.';
-    return {view:view,sync:true};
+    var changedTask=view.tasks.find(function(t){return t.id===task.id;});
+    var urgent=task.slots.some(function(slot){return slot.at>Date.now()+30000&&slot.at<=Date.now()+90*60000;});
+    return {view:view,sync:true,urgentSync:urgent,changed:true,change:{type:'upsert',task:changedTask}};
   }
   if(action==='remove'){
+    requireRevision_(d,p);
     var target=p.tasks.find(function(t){return t.id===d.id&&!t.deleted;});
     if(!target)throw fail_('BAD_REQUEST','Không tìm thấy công việc cần xóa.');
-    prepareCancellation_(p,target);target.deleted=true;
+    prepareCancellation_(p,target);target.deleted=true;bumpRevision_(p);
+    var urgentCancel=p.cancellations.some(function(c){return c.at>Date.now()+30000&&c.at<=Date.now()+90*60000;});
     saveState_(sh,item.row,p,info.email);
     var out=publicView_(p,info,req.actor.externalId);
     out.notice=p.cancellations.length?'Đã ẩn công việc. Một số lệnh hủy sẽ được thử lại tự động.':'Đã xóa công việc.';
-    return {view:out,sync:true};
+    return {view:out,sync:true,urgentSync:urgentCancel,changed:true,change:{type:'remove',id:target.id}};
   }
   throw fail_('BAD_REQUEST','Hành động không được hỗ trợ.');
 }
@@ -314,12 +337,15 @@ function doPost(e){
       return runAction_(request);
     });
     // Always commit the user's action before attempting network I/O.
-    if(result.sync){
-      try{syncAccount_(request.actor,4,request.action==='sync');}catch(syncErr){console.error('Deferred sync:',syncErr.message||syncErr);}
+    var syncedInline=false;
+    if(result.sync&&(request.action==='sync'||result.urgentSync)){
+      try{syncAccount_(request.actor,4,request.action==='sync');syncedInline=true;}catch(syncErr){console.error('Deferred sync:',syncErr.message||syncErr);}
       // The latest view can be refreshed with a read. Avoid a duplicate Sheets read on each write;
       // hourly sync retries in the background. Frontend explicitly labels pending work.
+      // Nonurgent user mutations are queued for a separate nonblocking sync request.
     }
-    return jsonOutput_({ok:true,result:result.view});
+    return jsonOutput_({ok:true,result:result.view,changed:!!result.changed,change:result.change||null,
+      needsSync:!!result.sync&&!syncedInline});
   }catch(err){
     console.error('doPost:',err&&err.stack||err);
     return jsonOutput_({ok:false,code:err&&err.clientCode||'SERVER',error:err&&err.clientMessage||'Không thể xử lý. Vui lòng thử lại hoặc liên hệ quản trị viên.'});

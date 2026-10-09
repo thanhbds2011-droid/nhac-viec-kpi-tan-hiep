@@ -2,7 +2,8 @@
 const $ = id => document.getElementById(id);
 const state = {
   config:null,credential:'',user:null,tasks:[],defaultTime:'07:30',editingId:null,
-  onesignal:null,busy:false,pushBusy:false,signingOut:false,sessionEpoch:0,filter:'all'
+  onesignal:null,busy:false,pushBusy:false,signingOut:false,sessionEpoch:0,filter:'all',
+  revision:0,realtime:null,broadcast:null,realtimeEpoch:0,lastVersionCheck:0,queuedChanges:[],checkingVersion:false,sessionToken:'',reconcileAfterBusy:false
 };
 let sdkPromise=null;
 let identityQueue=Promise.resolve();
@@ -34,10 +35,10 @@ function setBusy(on,which=''){
   if(which==='reload')$('reloadBtn').textContent=on?'Đang tải…':'↻ Làm mới';
 }
 async function api(action,data={}){
-  if(!state.credential)throw new Error('Bạn chưa đăng nhập Google.');
+  if(!state.credential&&!state.sessionToken)throw new Error('Bạn chưa đăng nhập Google.');
   const epoch=state.sessionEpoch,credential=state.credential;
   const r=await fetch('/api/data',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({credential,action,data}),cache:'no-store'});
+    body:JSON.stringify({...(state.sessionToken?{sessionToken:state.sessionToken}:{credential}),action,data}),cache:'no-store'});
   const json=await r.json().catch(()=>({error:'Máy chủ trả về dữ liệu không hợp lệ.'}));
   if(epoch!==state.sessionEpoch)throw new Error('Phiên đăng nhập đã thay đổi.');
   if(!r.ok||!json.ok)throw new Error(json.error||'Không thể xử lý yêu cầu.');
@@ -75,6 +76,7 @@ function makeButton(label,title,handler,cls=''){
 function taskStatus(t){
   const days=dayDiff(t.dueDate);
   if(days<0)return {label:'Đã quá hạn',cls:'done'};
+  if(t._optimistic)return {label:'Đang lưu…',cls:'warn'};
   if(t.warning)return {label:'Cần kiểm tra lịch',cls:'warn'};
   if(t.pending>0)return {label:'Đang xếp lịch',cls:'warn'};
   return {label:days===0?'Đến hạn hôm nay':days===1?'Còn 1 ngày':`Còn ${days} ngày`,cls:days<=3?'soon':'ok'};
@@ -148,29 +150,178 @@ function resetForm(){
   $('taskTime').value=state.defaultTime;$('formHeading').textContent='Thêm công việc';
   $('saveTask').textContent='Lưu công việc';$('cancelEdit').classList.add('hide');preview();
 }
-function updateData(data){
-  if(Array.isArray(data.tasks))state.tasks=data.tasks;
-  if(typeof data.defaultTime==='string')state.defaultTime=data.defaultTime;
+function paintData(){
   $('defaultTime').value=state.defaultTime;$('defaultTimeLabel').textContent=state.defaultTime;
   renderTasks();renderSchedule();
   $('notificationSummary').textContent=`Đang theo dõi ${state.tasks.filter(t=>dayDiff(t.dueDate)>=0).length} công việc chưa quá hạn.`;
 }
+function updateData(data){
+  if(Number.isSafeInteger(data.revision)&&data.revision<state.revision)return false;
+  if(Array.isArray(data.tasks))state.tasks=data.tasks;
+  if(typeof data.defaultTime==='string')state.defaultTime=data.defaultTime;
+  if(Number.isSafeInteger(data.revision))state.revision=data.revision;
+  paintData();return true;
+}
+function syncIndicator(text){const el=$('syncStatus');if(el)el.textContent=text;}
+// Apply one authorized, sequential delta without reloading Sheets; detect gaps.
+function applyChange(event){
+  if(!event||!Number.isSafeInteger(event.revision)||!event.change)return;
+  if(event.revision<=state.revision)return;
+  if(state.busy){state.queuedChanges.push(event);return;}
+  if(event.revision!==state.revision+1){void checkRevision(true);return;}
+  const change=event.change;
+  if(change.type==='upsert'&&change.task&&typeof change.task.id==='string'){
+    state.tasks=state.tasks.filter(t=>t.id!==change.task.id).concat([change.task]);
+  }else if(change.type==='remove'&&typeof change.id==='string'){
+    state.tasks=state.tasks.filter(t=>t.id!==change.id);
+    if(state.editingId===change.id){resetForm();showPane('list');}
+  }else if(change.type==='defaultTime'&&typeof change.time==='string'){
+    state.defaultTime=change.time;
+    if(!state.editingId)$('taskTime').value=change.time;
+  }else{void checkRevision(true);return;}
+  state.revision=event.revision;paintData();syncIndicator('Đã đồng bộ');
+}
+function flushChanges(){
+  const events=state.queuedChanges.splice(0).sort((a,b)=>a.revision-b.revision);
+  for(const event of events)applyChange(event);
+}
+function receiveChange(event){
+  if(!state.user)return;
+  applyChange(event);
+}
+function emitTabChange(event){
+  if(state.broadcast)try{state.broadcast.postMessage(event);}catch(_){}
+}
+async function checkRevision(force=false){
+  if(!state.user||state.busy||state.checkingVersion)return;
+  const now=Date.now();if(!force&&now-state.lastVersionCheck<30000)return;
+  state.lastVersionCheck=now;state.checkingVersion=true;
+  try{
+    const remote=await api('status');
+    if(!state.user)return;
+    if(Number.isSafeInteger(remote.revision)&&remote.revision!==state.revision){
+      if(state.busy){state.reconcileAfterBusy=true;return;}
+      syncIndicator('Đang cập nhật…');
+      const latest=await api('load');
+      if(state.busy){state.reconcileAfterBusy=true;return;}
+      updateData(latest);
+      syncIndicator('Đã đồng bộ');
+    }
+  }catch(err){syncIndicator('Chưa đồng bộ · Kiểm tra kết nối');}
+  finally{state.checkingVersion=false;}
+}
+let ablySdkPromise=null;
+function loadAblySdk(){
+  if(window.Ably)return Promise.resolve(window.Ably);
+  if(ablySdkPromise)return ablySdkPromise;
+  ablySdkPromise=new Promise((resolve,reject)=>{
+    const script=document.createElement('script');
+    script.src='https://cdn.ably.com/lib/ably.min-2.js';script.async=true;
+    script.onload=()=>window.Ably?resolve(window.Ably):reject(new Error('Không tải được SDK Ably.'));
+    script.onerror=()=>reject(new Error('Không thể kết nối máy chủ real-time.'));
+    document.head.appendChild(script);
+  }).catch(err=>{ablySdkPromise=null;throw err;});return ablySdkPromise;
+}
+async function connectRealtime(){
+  const epoch=state.sessionEpoch,externalId=state.user?.externalId;
+  if(!externalId)return;
+  if(typeof BroadcastChannel==='function'){
+    state.broadcast=new BroadcastChannel('nhac-kpi-'+externalId);
+    state.broadcast.onmessage=ev=>{if(epoch===state.sessionEpoch&&state.user?.externalId===externalId)receiveChange(ev.data);};
+  }
+  if(!state.config?.realtimeEnabled){syncIndicator('Đồng bộ trên thiết bị này · Chưa cấu hình Ably');return;}
+  try{
+    const Ably=await loadAblySdk();
+    if(epoch!==state.sessionEpoch||!state.user)return;
+    const authCallback=async (_params,callback)=>{
+      try{
+        if(epoch!==state.sessionEpoch||!state.user)throw new Error('Phiên đã kết thúc.');
+        const r=await fetch('/api/realtime',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify(state.sessionToken?{sessionToken:state.sessionToken}:{credential:state.credential}),cache:'no-store'});
+        const token=await r.json();
+        if(!r.ok)throw new Error(token.error||'Không được phép kết nối.');
+        callback(null,token);
+      }catch(err){callback(err,null);}
+    };
+    const client=new Ably.Realtime({authCallback,autoConnect:false});
+    state.realtime=client;
+    // Channel name is supplied by the verified server to the current account on load.
+    const channel=client.channels.get(state.user.realtimeChannel);
+    const subscription=channel.subscribe('data.changed',message=>{
+      if(epoch===state.sessionEpoch&&state.user?.externalId===externalId)receiveChange(message.data);
+    });
+    if(subscription&&typeof subscription.catch==='function')subscription.catch(err=>console.warn('Ably subscribe:',err.message));
+    channel.on('attached',()=>{if(epoch===state.sessionEpoch)void checkRevision(true);});
+    client.connection.on('connected',()=>{
+      if(epoch!==state.sessionEpoch)return;
+      syncIndicator('Đã kết nối đa thiết bị');
+    });
+    client.connection.on('disconnected',()=>syncIndicator('Mất kết nối tạm thời'));
+    client.connection.on('suspended',()=>syncIndicator('Đang kết nối lại…'));
+    client.connection.on('failed',()=>syncIndicator('Real-time chưa khả dụng'));
+    client.connect();
+  }catch(err){syncIndicator('Chưa kết nối real-time');console.warn('Realtime:',err.message);}
+}
+function disconnectRealtime(){
+  clearTimeout(pushSyncTimer);
+  if(state.broadcast){state.broadcast.close();state.broadcast=null;}
+  if(state.realtime){try{state.realtime.close();}catch(_){}state.realtime=null;}
+  state.queuedChanges=[];state.revision=0;state.lastVersionCheck=0;state.reconcileAfterBusy=false;
+}
 async function refresh(){
   if(state.busy)return;setBusy(true,'reload');
-  try{updateData(await api('load'));notify('Đã cập nhật danh sách công việc.');}
-  catch(err){notify(err.message,true);}finally{setBusy(false,'reload');}
+  try{updateData(await api('load'));syncIndicator('Đã đồng bộ');notify('Đã cập nhật danh sách công việc.');}
+  catch(err){notify(err.message,true);}finally{setBusy(false,'reload');flushChanges();}
+}
+// Display a pending local change immediately; the server still owns the final result.
+let pushSyncTimer=null;
+function kickOneSignalSync(){
+  clearTimeout(pushSyncTimer);const epoch=state.sessionEpoch;
+  pushSyncTimer=setTimeout(()=>{
+    if(epoch===state.sessionEpoch&&state.user)void api('sync').catch(err=>{console.warn('Hẹn đồng bộ OneSignal:',err.message);});
+  },250);
+}
+async function optimisticMutation(action,data,change){
+  if(state.busy)return;
+  const snapshot={tasks:state.tasks.map(t=>({...t})),defaultTime:state.defaultTime,revision:state.revision};
+  setBusy(true);
+  change();paintData();if(action!=='setDefaultTime')showPane('list',true);
+  try{
+    const result=await api(action,{...data,expectedRevision:snapshot.revision});
+    updateData(result);
+    if(action==='save')resetForm();
+    if(action==='remove'&&state.editingId===data.id)resetForm();
+    if(action==='setDefaultTime'&&!state.editingId)$('taskTime').value=state.defaultTime;
+    preview();
+    // Other tabs on the same browser work without a provider connection.
+    if(result.change)emitTabChange({revision:result.revision,change:result.change});
+    if(result.needsSync&&(action==='save'||action==='remove'))kickOneSignalSync();
+    notify(result.notice||(action==='remove'?'Đã xóa công việc.':'Đã cập nhật.'));
+  }catch(err){
+    // Even a timeout can mean the mutation was committed. Re-read once before rollback.
+    try{
+      const actual=await api('load');
+      updateData(actual);
+      syncIndicator('Đã đối soát');
+      notify('Đã kiểm tra dữ liệu trên máy chủ. '+err.message,true);
+    }catch(_){
+      if(state.revision<=snapshot.revision){state.tasks=snapshot.tasks;state.defaultTime=snapshot.defaultTime;paintData();}
+      syncIndicator('Chưa xác minh được · Làm mới khi có mạng');
+      notify(err.message+' Chưa xác nhận kết quả; hãy Làm mới khi có mạng.',true);
+    }
+  }finally{setBusy(false);flushChanges();
+    if(state.reconcileAfterBusy){state.reconcileAfterBusy=false;void checkRevision(true);}
+  }
 }
 async function saveTask(ev){
   ev.preventDefault();if(state.busy)return;
-  const title=$('taskTitle').value.trim(),dueDate=$('dueDate').value,time=$('taskTime').value;
+  const title=$('taskTitle').value.trim(),dueDate=$('dueDate').value,time=$('taskTime').value,id=state.editingId||'';
   if(!title||!dueDate||!time){notify('Hãy nhập tên, ngày đến hạn và giờ nhắc.',true);return;}
-  setBusy(true);
-  try{
-    const data=await api('save',{id:state.editingId||'',title,dueDate,time});
-    updateData(data);resetForm();showPane('list',true);
-    notify(data.notice||'Đã lưu. Nếu lịch đang xếp, hệ thống sẽ tiếp tục đồng bộ.');
-  }catch(err){notify(err.message+' Nếu yêu cầu hết thời gian chờ, bấm Làm mới để kiểm tra trước khi lưu lại.',true);}
-  finally{setBusy(false);}
+  const temporary=id||'pending-'+Date.now();
+  await optimisticMutation('save',{id,title,dueDate,time},()=>{
+    state.tasks=state.tasks.filter(t=>t.id!==id);
+    state.tasks.push({id:temporary,title,dueDate,time,pending:4,warning:'',_optimistic:true});
+  });
 }
 function openTaskMenu(t){
   if(state.busy)return;
@@ -183,28 +334,18 @@ function openTaskMenu(t){
 async function remove(t){
   if(state.busy)return;
   $('confirmText').textContent=`Xóa “${t.title}” và yêu cầu hủy các lượt nhắc chưa gửi?`;
-  const dialog=$('confirmDialog');
-  dialog.showModal();
-  dialog.addEventListener('close',async function onClose(){
+  const dialog=$('confirmDialog');dialog.showModal();
+  dialog.addEventListener('close',function onClose(){
     dialog.removeEventListener('close',onClose);
     if(dialog.returnValue!=='confirm'||state.busy)return;
-    setBusy(true);
-    try{
-      const data=await api('remove',{id:t.id});updateData(data);
-      if(state.editingId===t.id)resetForm();notify(data.notice||'Đã xóa công việc.');
-    }catch(err){notify(err.message+' Hãy Làm mới để kiểm tra trước khi xóa lại.',true);}
-    finally{setBusy(false);}
+    void optimisticMutation('remove',{id:t.id},()=>{state.tasks=state.tasks.filter(x=>x.id!==t.id);});
   },{once:true});
 }
 async function saveDefaultTime(){
   if(state.busy)return;
-  if(state.defaultTime===$('defaultTime').value){notify('Giờ mặc định không thay đổi.');return;}
-  setBusy(true);
-  try{
-    const result=await api('setDefaultTime',{time:$('defaultTime').value});updateData(result);
-    if(!state.editingId)$('taskTime').value=state.defaultTime;
-    preview();notify('Đã lưu giờ mặc định.');
-  }catch(err){notify(err.message,true);}finally{setBusy(false);}
+  const time=$('defaultTime').value;
+  if(state.defaultTime===time){notify('Giờ mặc định không thay đổi.');return;}
+  await optimisticMutation('setDefaultTime',{time},()=>{state.defaultTime=time;});
 }
 function pushState(){
   const o=state.onesignal,enabled=Boolean(o&&o.Notifications.permission&&o.User.PushSubscription.optedIn&&o.User.PushSubscription.id);
@@ -277,12 +418,13 @@ async function enablePush(){
 }
 async function signedIn(response){
   if(state.busy||state.signingOut||state.user)return;
-  const epoch=++state.sessionEpoch;state.credential=response.credential;setBusy(true);
+  const epoch=++state.sessionEpoch;state.credential=response.credential;state.sessionToken='';setBusy(true);
   $('loginHint').textContent='Đang kiểm tra quyền sử dụng…';
   try{
     const data=await api('load');
     if(epoch!==state.sessionEpoch)return;
-    state.user={email:data.email,name:data.name,externalId:data.externalId};
+    if(data.sessionToken)state.sessionToken=data.sessionToken;
+    state.user={email:data.email,name:data.name,externalId:data.externalId,realtimeChannel:data.realtimeChannel};
     const name=(data.name||data.email||'bạn').trim();
     $('displayName').textContent=name;$('accountEmail').textContent=data.email;
     $('profileName').textContent=name;$('profileEmail').textContent=data.email;
@@ -292,18 +434,19 @@ async function signedIn(response){
     $('signoutBtn').classList.remove('hide');resetForm();showPane('list');
     // Asynchronous login; never block the task list while SDK loads.
     void initPush(data.externalId);
-  }catch(err){state.credential='';$('loginHint').textContent=err.message;notify(err.message,true);}
+    void connectRealtime();
+  }catch(err){state.credential='';state.sessionToken='';$('loginHint').textContent=err.message;notify(err.message,true);}
   finally{setBusy(false);}
 }
 async function signout(){
   if(state.busy||state.signingOut)return;
-  state.signingOut=true;state.sessionEpoch++;setBusy(true);
+  state.signingOut=true;state.sessionEpoch++;disconnectRealtime();setBusy(true);
   try{
     // Serialize with an in-progress OneSignal.login to prevent cross-account binding.
     await queueIdentity(async()=>{if(sdkPromise){const o=await sdk();await o.logout();}});
   }catch(err){notify('Chưa thể ngắt OneSignal khỏi thiết bị. Hãy kiểm tra trạng thái thông báo trước khi dùng tài khoản khác.',true);}
   if(window.google?.accounts?.id)window.google.accounts.id.disableAutoSelect();
-  state.credential='';state.user=null;state.tasks=[];state.editingId=null;
+  state.credential='';state.sessionToken='';state.user=null;state.tasks=[];state.editingId=null;
   $('appView').classList.add('hide');$('signoutBtn').classList.add('hide');$('loginView').classList.remove('hide');
   $('loginHint').textContent='Bạn đã đăng xuất. Đăng nhập lại để quản lý công việc.';
   state.signingOut=false;setBusy(false);
@@ -330,6 +473,8 @@ async function start(){
   $('signoutBtn').addEventListener('click',signout);$('profileSignout').addEventListener('click',signout);
   $('profileDefaultTime').addEventListener('click',openDefaultSettings);
   $('profilePush').addEventListener('click',()=>showPane('notifications',true));
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)void checkRevision();});
+  window.addEventListener('online',()=>{syncIndicator('Đã có mạng · Đang kiểm tra…');void checkRevision(true);});
   $('menuClose').addEventListener('click',()=>$('taskMenu').close());
   document.querySelectorAll('[data-filter]').forEach(button=>button.addEventListener('click',()=>setFilter(button.dataset.filter)));
   resetForm();showPane('list');

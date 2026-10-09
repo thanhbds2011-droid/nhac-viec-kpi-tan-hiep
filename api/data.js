@@ -1,11 +1,7 @@
 'use strict';
 const crypto = require('node:crypto');
-const { OAuth2Client } = require('google-auth-library');
-const CLIENTS = new Map();
-function clientFor(id) {
-  if (!CLIENTS.has(id)) CLIENTS.set(id, new OAuth2Client(id));
-  return CLIENTS.get(id);
-}
+const {identify}=require('../server/identity');
+const {signSession}=require('../server/session');
 function reply(res, code, obj) {
   res.setHeader('Cache-Control', 'no-store, max-age=0');
   return res.status(code).json(obj);
@@ -21,21 +17,11 @@ module.exports = async (req, res) => {
   try {
     const reqSize = Number(req.headers['content-length'] || 0);
     if (reqSize > 14000) return reply(res, 413, { error: 'Dữ liệu yêu cầu quá lớn.' });
-    const { credential, action, data } = req.body || {};
-    if (!['load', 'save', 'remove', 'setDefaultTime', 'sync'].includes(action)) {
+    const { credential, sessionToken, action, data } = req.body || {};
+    if (!['load', 'save', 'remove', 'setDefaultTime', 'sync', 'status'].includes(action)) {
       return reply(res, 400, { error: 'Hành động không hợp lệ.' });
     }
-    if (typeof credential !== 'string' || credential.length > 5000 || !credential) {
-      return reply(res, 401, { error: 'Vui lòng đăng nhập Google.' });
-    }
-    const ticket = await clientFor(GOOGLE_CLIENT_ID).verifyIdToken({
-      idToken: credential, audience: GOOGLE_CLIENT_ID
-    });
-    const p = ticket.getPayload();
-    if (!p || !p.sub || !p.email || p.email_verified !== true ||
-        !['accounts.google.com', 'https://accounts.google.com'].includes(p.iss)) {
-      return reply(res, 401, { error: 'Không thể xác thực tài khoản Google.' });
-    }
+    const p = await identify({credential,sessionToken},process.env);
     const externalId = 'th_' + crypto.createHmac('sha256', PUSH_ID_SECRET)
       .update(String(p.sub)).digest('hex').slice(0, 44);
     const payload = {
@@ -75,8 +61,23 @@ module.exports = async (req, res) => {
         upstreamData.code === 'BAD_REQUEST' ? 400 : 502;
       return reply(res, status, { error: upstreamData.error || 'Lỗi nghiệp vụ Apps Script.' });
     }
-    return reply(res, 200, { ok: true, ...upstreamData.result, externalId });
+    // Publish a small event only after Apps Script confirms a committed user mutation.
+    // Never undo an accepted Google Sheets write because the realtime provider failed.
+    const { publishChange } = require('../server/realtime');
+    const { realtimeChannel } = require('../server/realtime');
+    const payloadOut = { ok: true, ...upstreamData.result, externalId,
+      realtimeChannel: process.env.ABLY_API_KEY ? realtimeChannel(p.sub, PUSH_ID_SECRET) : '' };
+    if (p.fromGoogle)payloadOut.sessionToken=signSession(p,PUSH_ID_SECRET);
+    if (upstreamData.changed)payloadOut.change=upstreamData.change;
+    if (upstreamData.needsSync)payloadOut.needsSync=true;
+    if (upstreamData.changed && upstreamData.change && process.env.ABLY_API_KEY) {
+      const event = { revision: upstreamData.result.revision, change: upstreamData.change };
+      try { await publishChange(p.sub, event, process.env); }
+      catch (err) { console.error('Realtime publication failed:', err.message); }
+    }
+    return reply(res, 200, payloadOut);
   } catch (err) {
+    if (err.message === 'SESSION_EXPIRED')return reply(res,401,{error:'Phiên đăng nhập hết hạn. Vui lòng đăng nhập lại.'});
     if (err.name === 'AbortError') return reply(res, 504, { error: 'Máy chủ hết thời gian chờ Apps Script. Kiểm tra lại lịch trước khi thử lưu.' });
     if (String(err.message || '').includes('Wrong number of segments') ||
         String(err.message || '').includes('Token used too late') ||

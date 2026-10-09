@@ -21,7 +21,7 @@ test('mọi id truy cập qua $() có trong HTML và không trùng nhau',()=>{
   assert.deepEqual(missing,[]);
 });
 test('giữ các API và định danh OneSignal ban đầu',()=>{
-  for(const expected of ["api('load')","api('save'","api('remove'","api('setDefaultTime'","api('sync')",'await o.login(externalId)','await o.logout()'])
+  for(const expected of ["api('load')","optimisticMutation('save'","optimisticMutation('remove'","optimisticMutation('setDefaultTime'","api('sync')",'await o.login(externalId)','await o.logout()'])
     assert.ok(js.includes(expected),'Thiếu '+expected);
 });
 test('bố cục responsive và hai nút mobile có id riêng',()=>{

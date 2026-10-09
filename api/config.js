@@ -7,5 +7,5 @@ module.exports = (req, res) => {
   if (!googleClientId || !oneSignalAppId) {
     return res.status(503).json({ error: 'Chưa cài GOOGLE_CLIENT_ID hoặc ONESIGNAL_APP_ID trên Vercel.' });
   }
-  return res.status(200).json({ googleClientId, oneSignalAppId });
+  return res.status(200).json({ googleClientId, oneSignalAppId, realtimeEnabled: Boolean(process.env.ABLY_API_KEY) });
 };
