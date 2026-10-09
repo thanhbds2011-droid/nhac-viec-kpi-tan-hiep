@@ -3,11 +3,11 @@ const $ = id => document.getElementById(id);
 const state = {
   config:null,credential:'',user:null,tasks:[],defaultTime:'07:30',editingId:null,
   onesignal:null,pushError:'',pushBoundAccount:'',busy:false,pushBusy:false,signingOut:false,sessionEpoch:0,filter:'all',
-  revision:0,realtime:null,broadcast:null,realtimeEpoch:0,lastVersionCheck:0,queuedChanges:[],checkingVersion:false,sessionToken:'',reconcileAfterBusy:false
+  revision:0,inbox:[],deletedSourceKeys:[],isAdmin:false,managerConfigured:false,realtime:null,broadcast:null,realtimeEpoch:0,lastVersionCheck:0,queuedChanges:[],checkingVersion:false,sessionToken:'',reconcileAfterBusy:false
 };
 let identityQueue=Promise.resolve();
 let activeMobilePane='list';
-const PANE_IDS={create:'createPane',list:'listPane',schedule:'schedulePane',notifications:'notificationsPane',profile:'profilePane'};
+const PANE_IDS={create:'createPane',list:'listPane',schedule:'schedulePane',notifications:'notificationsPane',profile:'profilePane',admin:'adminPane'};
 const NAV_IDS={list:'tabList',schedule:'tabSchedule',notifications:'tabNotifications',profile:'tabProfile'};
 function pad2(n){return String(n).padStart(2,'0');}
 function vnDate(d){const [y,m,day]=d.split('-');return `${day}/${m}/${y}`;}
@@ -52,7 +52,8 @@ function showPane(name,scroll=false){
     button.classList.toggle('is-active',selected);
     if(selected)button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');
   });
-  $('tabCreate').classList.toggle('hide',activeMobilePane==='create');
+  $('tabCreate').classList.toggle('hide',activeMobilePane==='create'||activeMobilePane==='admin');
+  if(activeMobilePane==='admin'&&state.isAdmin)void refreshAdmin();
   if(scroll&&window.matchMedia('(max-width:720px)').matches)window.scrollTo({top:0,behavior:'auto'});
 }
 function preview(){
@@ -117,6 +118,33 @@ function renderTasks(){
     item.append(main,actions);box.append(item);
   }
 }
+function renderInbox(){
+  const root=$('managerInbox');root.replaceChildren();
+  $('inboxCount').textContent=String(state.inbox.length);
+  if(!state.inbox.length){root.textContent='Không có công việc nào của nhân viên đang chờ bạn xem xét.';return;}
+  for(const notice of state.inbox){
+    const el=document.createElement('article');el.className='inbox-item';
+    const title=document.createElement('strong');title.textContent=notice.from+' đã hoàn thành công việc';
+    const body=document.createElement('p');body.textContent=notice.title;
+    const note=document.createElement('small');note.textContent='Vui lòng vào iCPV để xem xét, chấm điểm.';
+    const del=makeButton('Xóa thông báo','Xóa thông báo đã xử lý',()=>void dismissNotification(notice.id),'small secondary');
+    el.append(title,body,note,del);root.appendChild(el);
+  }
+}
+async function dismissNotification(id){
+  if(state.busy)return;
+  await optimisticMutation('dismissNotification',{id},()=>{state.inbox=state.inbox.filter(n=>n.id!==id);});
+}
+async function refreshAdmin(){
+  if(!state.isAdmin||!state.user)return;
+  try{
+    const r=await api('adminStats');if(!state.user||!state.isAdmin)return;
+    const stats=r.adminStats;
+    $('adminAccounts').textContent=String(stats.accounts);
+    $('adminTasks').textContent=String(stats.totalCreated);
+    $('adminNote').textContent=stats.note||'';
+  }catch(err){$('adminNote').textContent='Chưa tải được số liệu. '+err.message;}
+}
 function renderSchedule(){
   const box=$('scheduleList');box.replaceChildren();
   const tasks=[...state.tasks].sort((a,b)=>a.dueDate.localeCompare(b.dueDate));
@@ -151,13 +179,17 @@ function resetForm(){
 }
 function paintData(){
   $('defaultTime').value=state.defaultTime;$('defaultTimeLabel').textContent=state.defaultTime;
-  renderTasks();renderSchedule();
+  renderTasks();renderSchedule();renderInbox();
   $('notificationSummary').textContent=`Đang theo dõi ${state.tasks.filter(t=>dayDiff(t.dueDate)>=0).length} công việc chưa quá hạn.`;
 }
 function updateData(data){
   if(Number.isSafeInteger(data.revision)&&data.revision<state.revision)return false;
   if(Array.isArray(data.tasks))state.tasks=data.tasks;
   if(typeof data.defaultTime==='string')state.defaultTime=data.defaultTime;
+  if(Array.isArray(data.inbox))state.inbox=data.inbox;
+  if(Array.isArray(data.deletedSourceKeys))state.deletedSourceKeys=data.deletedSourceKeys;
+  if(typeof data.isAdmin==='boolean')state.isAdmin=data.isAdmin;
+  if(typeof data.managerConfigured==='boolean')state.managerConfigured=data.managerConfigured;
   if(Number.isSafeInteger(data.revision))state.revision=data.revision;
   paintData();return true;
 }
@@ -177,6 +209,8 @@ function applyChange(event){
   }else if(change.type==='remove'&&typeof change.id==='string'){
     state.tasks=state.tasks.filter(t=>t.id!==change.id);
     if(state.editingId===change.id){resetForm();showPane('list');}
+  }else if(change.type==='inboxChanged'){
+    void refresh();return;
   }else if(change.type==='defaultTime'&&typeof change.time==='string'){
     state.defaultTime=change.time;
     if(!state.editingId)$('taskTime').value=change.time;
@@ -231,7 +265,7 @@ async function connectRealtime(){
     state.broadcast=new BroadcastChannel('nhac-kpi-'+externalId);
     state.broadcast.onmessage=ev=>{if(epoch===state.sessionEpoch&&state.user?.externalId===externalId)receiveChange(ev.data);};
   }
-  if(!state.config?.realtimeEnabled){syncIndicator('Đồng bộ trên thiết bị này · Chưa cấu hình Ably');return;}
+  if(!state.config?.realtimeEnabled){syncIndicator('Đồng bộ giữa các tab trên thiết bị này');return;}
   try{
     const Ably=await loadAblySdk();
     if(epoch!==state.sessionEpoch||!state.user)return;
@@ -260,9 +294,9 @@ async function connectRealtime(){
     });
     client.connection.on('disconnected',()=>syncIndicator('Mất kết nối tạm thời'));
     client.connection.on('suspended',()=>syncIndicator('Đang kết nối lại…'));
-    client.connection.on('failed',()=>syncIndicator('Real-time chưa khả dụng'));
+    client.connection.on('failed',()=>syncIndicator('Chưa đồng bộ ngay giữa các thiết bị'));
     client.connect();
-  }catch(err){syncIndicator('Chưa kết nối real-time');console.warn('Realtime:',err.message);}
+  }catch(err){syncIndicator('Chưa đồng bộ ngay giữa các thiết bị');console.warn('Realtime:',err.message);}
 }
 function disconnectRealtime(){
   clearTimeout(pushSyncTimer);
@@ -285,7 +319,7 @@ function kickOneSignalSync(){
 }
 async function optimisticMutation(action,data,change){
   if(state.busy)return;
-  const snapshot={tasks:state.tasks.map(t=>({...t})),defaultTime:state.defaultTime,revision:state.revision};
+  const snapshot={tasks:state.tasks.map(t=>({...t})),inbox:state.inbox.map(n=>({...n})),defaultTime:state.defaultTime,revision:state.revision};
   setBusy(true);
   change();paintData();if(action!=='setDefaultTime')showPane('list',true);
   try{
@@ -307,7 +341,7 @@ async function optimisticMutation(action,data,change){
       syncIndicator('Đã đối soát');
       notify('Đã kiểm tra dữ liệu trên máy chủ. '+err.message,true);
     }catch(_){
-      if(state.revision<=snapshot.revision){state.tasks=snapshot.tasks;state.defaultTime=snapshot.defaultTime;paintData();}
+      if(state.revision<=snapshot.revision){state.tasks=snapshot.tasks;state.inbox=snapshot.inbox;state.defaultTime=snapshot.defaultTime;paintData();}
       syncIndicator('Chưa xác minh được · Làm mới khi có mạng');
       notify(err.message+' Chưa xác nhận kết quả; hãy Làm mới khi có mạng.',true);
     }
@@ -335,12 +369,15 @@ function openTaskMenu(t){
 }
 async function remove(t){
   if(state.busy)return;
-  $('confirmText').textContent=`Xóa “${t.title}” và yêu cầu hủy các lượt nhắc chưa gửi?`;
+  $('confirmText').textContent=state.managerConfigured?
+    `Bạn đã hoàn thành “${t.title}” trên iCPV? Trưởng phòng sẽ được thông báo để chấm điểm.`:
+    `Bạn đã hoàn thành “${t.title}”? Chưa có thông tin Trưởng phòng nhận thông báo; hãy liên hệ quản trị viên.`;
   const dialog=$('confirmDialog');dialog.showModal();
   dialog.addEventListener('close',function onClose(){
     dialog.removeEventListener('close',onClose);
-    if(dialog.returnValue!=='confirm'||state.busy)return;
-    void optimisticMutation('remove',{id:t.id},()=>{state.tasks=state.tasks.filter(x=>x.id!==t.id);});
+    if(!['confirm','discard'].includes(dialog.returnValue)||state.busy)return;
+    void optimisticMutation('remove',{id:t.id,mode:dialog.returnValue==='discard'?'discard':'completed'},
+      ()=>{state.tasks=state.tasks.filter(x=>x.id!==t.id);});
   },{once:true});
 }
 async function saveDefaultTime(){
@@ -373,12 +410,12 @@ function pushSnapshot(){
 function pushState(){
   if(!state.user)return;
   const snap=pushSnapshot(),issue=pushDeviceIssue();
-  const detail=issue||state.pushError||(!snap.sdk?'Đang kết nối dịch vụ OneSignal…':
-    !snap.account?'Đang liên kết tài khoản với OneSignal…':
+  const detail=issue||state.pushError||(!snap.sdk?'Đang kết nối dịch vụ thông báo…':
+    !snap.account?'Đang liên kết thiết bị với tài khoản…':
     snap.browserPermission!=='granted'?'Thiết bị cần được cấp quyền thông báo.':
-    !snap.subscription?'Đã cấp quyền, đang chờ thiết bị đăng ký OneSignal. Bấm Kiểm tra lại nếu trạng thái không đổi.':
+    !snap.subscription?'Đã cấp quyền nhưng thiết bị chưa đăng ký xong. Hãy bấm Kiểm tra lại.':
     !snap.optedIn?'Thiết bị đang tắt đăng ký nhận tin. Bấm Bật thông báo để đăng ký lại.':
-    'Thiết bị đã đăng ký OneSignal cho tài khoản Google hiện tại.');
+    'Thiết bị đã sẵn sàng nhận thông báo cho tài khoản này.');
   $('pushDot').className='status-dot '+(snap.ready?'on':'off');
   $('pushStatus').textContent=snap.ready?'Thông báo đã bật trên thiết bị này':issue?'Chưa thể nhận thông báo':
     state.pushError?'Thông báo cần kiểm tra':'Chưa bật thông báo trên thiết bị này';
@@ -438,7 +475,7 @@ async function initPush(externalId){
   }catch(err){
     if(epoch===state.sessionEpoch){
       state.pushBoundAccount='';
-      state.pushError='Không kết nối được OneSignal: '+String(err?.message||err).slice(0,180);
+      state.pushError='Chưa kết nối được thông báo: '+String(err?.message||err).slice(0,180);
       pushState();
     }
     throw err;
@@ -464,13 +501,13 @@ async function enablePush(){
   // Do NOT await SDK login/network before requesting the native permission dialog.
   const o=state.onesignal;
   if(!o){
-    state.pushError='OneSignal đang khởi tạo. Đợi vài giây rồi bấm Bật thông báo lần nữa.';
+    state.pushError='Đang chuẩn bị thông báo. Hãy thử bấm Bật thông báo lại sau khi trang đã tải xong.';
     pushState();
     void initPush(state.user.externalId).catch(()=>{});
     notify(state.pushError,true);return;
   }
   if(!o.Notifications.isPushSupported()){
-    state.pushError='OneSignal báo thiết bị không hỗ trợ Web Push; hãy dùng trình duyệt tương thích.';
+    state.pushError='Thiết bị này chưa hỗ trợ nhận thông báo. Vui lòng dùng trình duyệt tương thích.';
     pushState();notify(state.pushError,true);return;
   }
   let permissionRequest=null;
@@ -489,12 +526,12 @@ async function enablePush(){
     await initPush(externalId);
     if(epoch!==state.sessionEpoch)throw new Error('Phiên đăng nhập đã thay đổi.');
     if(!o.User.PushSubscription.optedIn)await o.User.PushSubscription.optIn();
-    if(!await waitForSubscription(o))throw new Error('Đã cấp quyền nhưng OneSignal chưa tạo đăng ký thiết bị. Kiểm tra tường lửa, trình chặn hoặc cấu hình Web Push trên OneSignal.');
+    if(!await waitForSubscription(o))throw new Error('Đã cấp quyền nhưng thiết bị chưa đăng ký nhận thông báo thành công. Vui lòng kiểm tra kết nối hoặc nhờ quản trị viên hỗ trợ.');
     if(epoch!==state.sessionEpoch)throw new Error('Phiên đăng nhập đã thay đổi.');
     state.pushError='';pushState();
     // Device registration does not itself prove scheduled pushes are being delivered.
     const response=await api('sync');updateData(response);
-    notify('Thiết bị đã đăng ký OneSignal. Đã yêu cầu kiểm tra lịch nhắc; hãy thử gửi thông báo kiểm tra từ OneSignal.');
+    notify('Thiết bị đã đăng ký nhận thông báo. Hãy thử thông báo kiểm tra trước khi sử dụng chính thức.');
   }catch(err){
     if(epoch===state.sessionEpoch){state.pushError=String(err?.message||err);pushState();}
     notify(String(err?.message||err),true);
@@ -516,7 +553,7 @@ async function signedIn(response){
     $('profileName').textContent=name;$('profileEmail').textContent=data.email;
     const initials=name.split(/\s+/).slice(-2).map(s=>s[0]||'').join('').toUpperCase();
     $('profileAvatar').textContent=initials||'NV';
-    updateData(data);$('loginView').classList.add('hide');$('appView').classList.remove('hide');
+    updateData(data);$('adminShortcut').classList.toggle('hide',!state.isAdmin);$('desktopAdminBtn').classList.toggle('hide',!state.isAdmin);$('loginView').classList.add('hide');$('appView').classList.remove('hide');
     $('signoutBtn').classList.remove('hide');resetForm();showPane('list');
     // Asynchronous login; never block the task list while SDK loads.
     state.pushBoundAccount='';state.pushError='';
@@ -535,8 +572,8 @@ async function signout(){
     await queueIdentity(async()=>{if(sdkInitPromise){const o=await sdk();await o.logout();}});
   }catch(err){notify('Chưa thể ngắt OneSignal khỏi thiết bị. Hãy kiểm tra trạng thái thông báo trước khi dùng tài khoản khác.',true);}
   if(window.google?.accounts?.id)window.google.accounts.id.disableAutoSelect();
-  state.credential='';state.sessionToken='';state.user=null;state.tasks=[];state.editingId=null;state.pushBoundAccount='';state.pushError='';
-  $('appView').classList.add('hide');$('signoutBtn').classList.add('hide');$('loginView').classList.remove('hide');
+  state.credential='';state.sessionToken='';state.user=null;state.tasks=[];state.inbox=[];state.deletedSourceKeys=[];state.isAdmin=false;state.managerConfigured=false;state.editingId=null;state.pushBoundAccount='';state.pushError='';
+  $('desktopAdminBtn').classList.add('hide');$('appView').classList.add('hide');$('signoutBtn').classList.add('hide');$('loginView').classList.remove('hide');
   $('loginHint').textContent='Bạn đã đăng xuất. Đăng nhập lại để quản lý công việc.';
   state.signingOut=false;setBusy(false);
 }
@@ -565,6 +602,11 @@ async function start(){
   $('signoutBtn').addEventListener('click',signout);$('profileSignout').addEventListener('click',signout);
   $('profileDefaultTime').addEventListener('click',openDefaultSettings);
   $('profilePush').addEventListener('click',()=>showPane('notifications',true));
+  $('desktopJobsBtn').addEventListener('click',()=>showPane('list'));
+  $('desktopNoticeBtn').addEventListener('click',()=>{showPane('notifications');void refresh();});
+  $('desktopAdminBtn').addEventListener('click',()=>{if(state.isAdmin)showPane('admin');});
+  $('adminShortcut').addEventListener('click',()=>showPane('admin',true));
+  $('adminBack').addEventListener('click',()=>showPane('profile',true));
   document.addEventListener('visibilitychange',()=>{if(!document.hidden)void checkRevision();});
   window.addEventListener('online',()=>{syncIndicator('Đã có mạng · Đang kiểm tra…');void checkRevision(true);});
   $('menuClose').addEventListener('click',()=>$('taskMenu').close());
@@ -602,12 +644,22 @@ function receiveImportFromExtension(event){
     clean.push({sourceKey:input.sourceKey,title:String(input.title||'').slice(0,90).trim(),dueDate:input.dueDate});
   }
   if(!clean.length){notify('Không có nhiệm vụ hợp lệ để xem trước.',true);return;}
-  pendingImport=clean;
+  const known=new Map(state.tasks.filter(t=>t.sourceKey).map(t=>[t.sourceKey,t]));
+  const deleted=new Set(state.deletedSourceKeys);
+  const changes=clean.filter(t=>known.has(t.sourceKey)&&known.get(t.sourceKey).dueDate!==t.dueDate);
+  const fresh=clean.filter(t=>!known.has(t.sourceKey)&&!deleted.has(t.sourceKey));
+  // Source keys are sent by the extension, never trusted for authorization on the server.
+  pendingImport=fresh;
+  if(changes.length){
+    const sample=changes.slice(0,5).map(t=>'• '+t.title.slice(0,50)).join('\n');
+    window.alert('Có '+changes.length+' công việc có thời hạn trên iCPV khác với lịch đang theo dõi.\nHãy kiểm tra và sửa ngày hạn trong Nhắc việc nếu cần:\n'+sample);
+  }
+  if(!fresh.length){notify('Không có công việc mới cần nhập.');return;}
   $('importAccount').textContent=state.user.email;
   $('importAccountConfirm').checked=false;
   const list=$('importPreview');list.replaceChildren();
-  for(let i=0;i<clean.length;i++){
-    const t=clean[i],row=document.createElement('label');row.className='import-row';
+  for(let i=0;i<fresh.length;i++){
+    const t=fresh[i],row=document.createElement('label');row.className='import-row';
     const check=document.createElement('input');check.type='checkbox';check.checked=true;
     check.dataset.index=String(i);
     const content=document.createElement('div'),title=document.createElement('input');
@@ -617,7 +669,7 @@ function receiveImportFromExtension(event){
     const deadline=document.createElement('small');deadline.textContent='Hạn: '+vnDate(t.dueDate);
     content.append(title,deadline);row.append(check,content);list.append(row);
   }
-  $('importInfo').textContent='Đã đọc '+clean.length+' nhiệm vụ từ danh sách đang hiển thị. Chỉ nhiệm vụ được chọn mới được gửi lên Nhắc việc. Hãy kiểm tra tên và ngày hạn.';
+  $('importInfo').textContent='Đã đọc '+clean.length+' nhiệm vụ. Có '+fresh.length+' công việc mới. Các công việc đã nhập trước đó được giữ nguyên. Hãy kiểm tra trước khi đồng bộ.';
   $('importDialog').showModal();
 }
 async function confirmImport(){

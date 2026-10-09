@@ -30,15 +30,16 @@ test('Import vào Sheet đúng một lần; gửi sự kiện batch; không tạ
  assert.equal(second.changed,false);assert.equal(second.view.importSummary.unchanged,1);
  assert.equal(h.writes(),1);assert.equal(h.profile.tasks.length,1);
 });
-test('Đổi hạn theo cùng sourceKey, giữ tên riêng và giờ riêng; revision tăng một',()=>{
+test('Khi iCPV đổi hạn, không ghi đè tên riêng, giờ riêng, thời hạn của người dùng',()=>{
  const h=harness();h.run([{sourceKey:KEY1,title:'Tên gốc',dueDate:'2026-12-15'}]);
  h.profile.tasks[0].title='Tên tôi đã rút gọn';h.profile.tasks[0].time='19:00';
  const r=h.run([{sourceKey:KEY1,title:'Tên gốc',dueDate:'2026-12-22'}]);
- assert.equal(r.view.importSummary.updated,1);
+ assert.equal(r.view.importSummary.updated,0);
+ assert.equal(r.view.importSummary.skipped,1);
  assert.equal(h.profile.tasks[0].time,'19:00');
  assert.equal(h.profile.tasks[0].title,'Tên tôi đã rút gọn');
- assert.equal(h.profile.tasks[0].dueDate,'2026-12-22');
- assert.equal(h.profile.revision,2);assert.equal(h.writes(),2);
+ assert.equal(h.profile.tasks[0].dueDate,'2026-12-15');
+ assert.equal(h.profile.revision,1);assert.equal(h.writes(),1);
 });
 test('Không hồi sinh task xóa và không chiếm task thủ công cùng tên',()=>{
  const h=harness();

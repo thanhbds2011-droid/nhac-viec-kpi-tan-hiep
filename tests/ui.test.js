@@ -35,7 +35,7 @@ test('chuyển 5 chế độ giao diện mobile không gọi API',()=>{
   const snippet=js.slice(js.indexOf('function showPane('),js.indexOf('function preview()'));
   const classes=()=>{const set=new Set();return{toggle(key,yes){if(yes)set.add(key);else set.delete(key);},has(key){return set.has(key);}}};
   const elements=Object.fromEntries(['appView','createPane','listPane','schedulePane','notificationsPane','profilePane',
-    'tabCreate','tabList','tabSchedule','tabNotifications','tabProfile'].map(id=>[id,{dataset:{},classList:classes(),setAttribute(k,v){this[k]=v;},removeAttribute(k){delete this[k];}}]));
+    'tabCreate','tabList','tabSchedule','tabNotifications','tabProfile','adminPane'].map(id=>[id,{dataset:{},classList:classes(),setAttribute(k,v){this[k]=v;},removeAttribute(k){delete this[k];}}]));
   const ctx={$:id=>elements[id],window:{matchMedia:()=>({matches:false}),scrollTo(){}},api(){throw Error('Không được phép gọi API');}};
   vm.createContext(ctx);vm.runInContext(defs+snippet,ctx);
   for(const name of ['list','create','schedule','notifications','profile']){

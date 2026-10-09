@@ -1,3 +1,13 @@
+# Nhắc việc KPI – Tân Hiệp v1.5.0
+
+**Bản cập nhật đã CHỐT ngày 09/10/2026.** Giữ nguyên kiến trúc v1.4.1, chỉ bổ sung đồng bộ iCPV chọn lọc, xác nhận hoàn thành khi xóa việc, thông báo cho Trưởng phòng và thống kê quản trị.
+
+**Hướng dẫn bắt buộc trước khi triển khai:** [`docs/TRIEN-KHAI-V1.5.0-CHOT.md`](docs/TRIEN-KHAI-V1.5.0-CHOT.md). Việc gửi thông báo cho Trưởng phòng cần cấu hình quan hệ quản lý trong Access; không tự tạo cột hoặc sửa dữ liệu sản xuất.
+
+---
+
+## Tài liệu phiên bản trước (giữ lại để tham chiếu)
+
 # Nhắc việc KPI – Tân Hiệp v1.3.0 (YC-005)
 
 Ứng dụng PWA nhắc việc cá nhân cho nhân sự Trung tâm Bảo trợ xã hội Tân Hiệp; phát triển từ **baseline v1.2.0**, không tạo dự án mới.

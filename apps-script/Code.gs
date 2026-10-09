@@ -1,5 +1,5 @@
 /**
- * NHẮC VIỆC KPI – TÂN HIỆP | production v1.4.0
+ * NHẮC VIỆC KPI – TÂN HIỆP | production v1.5.0
  * Google Sheets Access/State unchanged. Single OneSignal application.
  * Never call OneSignal while holding the shared script lock.
  * Durable claim + idempotency key protects concurrent edits and uncertain responses.
@@ -7,6 +7,7 @@
  */
 var SHEET_ACCESS='Access';
 var SHEET_STATE='State';
+// Optional Access column E: email người quản lý (configured by administrator, never created automatically).
 var VN_ZONE='Asia/Ho_Chi_Minh';
 var DAYS_AHEAD=7;
 var MAX_ACTIVE=50;
@@ -63,7 +64,7 @@ function withLock_(callback,waitMs){
 function accessRows_(ss){
   var sh=ss.getSheetByName(SHEET_ACCESS);
   if(!sh||sh.getLastRow()<2)return [];
-  return sh.getRange(2,1,sh.getLastRow()-1,4).getDisplayValues();
+  return sh.getRange(2,1,sh.getLastRow()-1,sh.getLastColumn()>=5?5:4).getDisplayValues();
 }
 function enabled_(s){return ['YES','TRUE','1','CÓ','CO','ACTIVE'].indexOf(String(s).trim().toUpperCase())!==-1;}
 function checkAccess_(ss,actor){
@@ -72,17 +73,21 @@ function checkAccess_(ss,actor){
   for(var i=0;i<entries.length;i++){
     if(String(entries[i][0]).trim().toLowerCase()!==email)continue;
     if(!enabled_(entries[i][2]))throw fail_('FORBIDDEN','Tài khoản chưa được kích hoạt hoặc đã bị thu hồi quyền.');
-    return {email:email,name:String(entries[i][1]).trim()||String(actor.name||'').slice(0,80)||email,role:String(entries[i][3]||'').trim()};
+    return {email:email,name:String(entries[i][1]).trim()||String(actor.name||'').slice(0,80)||email,role:String(entries[i][3]||'').trim(),managerEmail:String(entries[i][4]||'').trim().toLowerCase()};
   }
   throw fail_('FORBIDDEN','Tài khoản Google này chưa có trong danh sách Access.');
 }
 function stateSheet_(ss){var sh=ss.getSheetByName(SHEET_STATE);if(!sh)throw new Error('Chưa chạy setupProject.');return sh;}
-function newState_(){return {defaultTime:'07:30',externalId:'',tasks:[],cancellations:[],revision:0};}
+function newState_(){return {defaultTime:'07:30',externalId:'',tasks:[],cancellations:[],revision:0,totalCreated:0,inbox:[],completionOutbox:[],deletedSourceKeys:[]};}
 function normalizeState_(value){
   if(!Array.isArray(value.tasks))value.tasks=[];
   if(!Array.isArray(value.cancellations))value.cancellations=[];
   if(!validTime_(value.defaultTime))value.defaultTime='07:30';
   if(!Number.isSafeInteger(value.revision)||value.revision<0)value.revision=0;
+  if(!Number.isSafeInteger(value.totalCreated)||value.totalCreated<0)value.totalCreated=value.tasks.length;
+  if(!Array.isArray(value.inbox))value.inbox=[];
+  if(!Array.isArray(value.completionOutbox))value.completionOutbox=[];
+  if(!Array.isArray(value.deletedSourceKeys))value.deletedSourceKeys=[];
   return value;
 }
 function readState_(ss,actor,create){
@@ -115,10 +120,12 @@ function vnToday_(){return Utilities.formatDate(new Date(),VN_ZONE,'yyyy-MM-dd')
 function vnDay_(s){return s.slice(8,10)+'/'+s.slice(5,7)+'/'+s.slice(0,4);}
 function publicView_(profile,info,ext){
   var now=Date.now(),horizon=now+DAYS_AHEAD*DAY_MS;
-  return {email:info.email,name:info.name,externalId:ext,defaultTime:profile.defaultTime,revision:profile.revision,
+  return {email:info.email,name:info.name,externalId:ext,defaultTime:profile.defaultTime,revision:profile.revision,isAdmin:isAdmin_(info.role),managerConfigured:!!info.managerEmail&&!isManagerRole_(info.role),
+    deletedSourceKeys:profile.deletedSourceKeys,
+    inbox:profile.inbox.filter(function(n){return !n.dismissed;}).map(function(n){return {id:n.id,from:n.from,title:n.title,at:n.at};}),
     tasks:profile.tasks.filter(function(t){return !t.deleted;}).map(function(t){
       var pending=(t.slots||[]).filter(function(s){return !s.id&&s.at>now&&s.at<=horizon;}).length;
-      return {id:t.id,title:t.title,dueDate:t.dueDate,time:t.time,pending:pending,
+      return {id:t.id,title:t.title,dueDate:t.dueDate,time:t.time,sourceKey:t.sourceKey||'',pending:pending,
         warning:profile.cancellations.length?'Một số lịch cũ đang chờ hủy.':(t.lastError||'')};
     })};
 }
@@ -142,18 +149,83 @@ function requireRevision_(data,p){
   if(!Number.isSafeInteger(data.expectedRevision)||data.expectedRevision!==p.revision)
     throw fail_('CONFLICT','Dữ liệu đã được thay đổi trên thiết bị khác. Vui lòng đồng bộ trước khi tiếp tục.');
 }
+// YC-008/013: manager and admin access are decided exclusively from Access, not client data.
+function isAdmin_(role){return /^(ADMIN|ADMINISTRATOR|QUAN TRI|QUẢN TRỊ|QUAN TRI VIEN|QUẢN TRỊ VIÊN)$/i.test(String(role||'').trim());}
+function isManagerRole_(role){return isAdmin_(role)||/(TRƯỞNG|TRUONG|MANAGER|LEADER|LÃNH ĐẠO|LANH DAO|HEAD)/i.test(String(role||''));}
+function findActiveManager_(ss,email){
+  if(!email)return null;
+  var entries=accessRows_(ss),match=entries.find(function(r){return String(r[0]||'').trim().toLowerCase()===email&&enabled_(r[2]);});
+  return match?{email:email,name:String(match[1]||'').trim()||email}:null;
+}
+function stateRowByEmail_(sh,email){
+  var last=sh.getLastRow();if(last<2)return 0;
+  var rows=sh.getRange(2,2,last-1,1).getDisplayValues();
+  for(var i=0;i<rows.length;i++)if(String(rows[i][0]).trim().toLowerCase()===email)return i+2;
+  return 0;
+}
+// Called under script lock. Source outbox is saved BEFORE any cross-account operation;
+// idempotent manager inbox insertion prevents duplicates after uncertain writes.
+function deliverOutbox_(ss,managerEmail){
+  if(!managerEmail||!findActiveManager_(ss,managerEmail))return false;
+  var sh=stateSheet_(ss),targetRow=stateRowByEmail_(sh,managerEmail);if(!targetRow)return false;
+  var raw=sh.getRange(targetRow,3).getValue(),recipient=normalizeState_(raw?JSON.parse(String(raw)):newState_());
+  var last=sh.getLastRow(),rows=sh.getRange(2,2,last-1,2).getValues(),inboxDirty=false,delivered=false,access=accessRows_(ss);
+  for(var i=0;i<rows.length;i++){
+    var row=i+2,sourceEmail=String(rows[i][0]||'').trim().toLowerCase();
+    if(sourceEmail===managerEmail||!rows[i][1])continue;
+    // Always enforce the CURRENT administrator-approved relationship at delivery time.
+    var sourceAccess=access.find(function(a){return String(a[0]||'').trim().toLowerCase()===sourceEmail&&enabled_(a[2]);});
+    if(!sourceAccess||String(sourceAccess[4]||'').trim().toLowerCase()!==managerEmail)continue;
+    var source;
+    try{source=normalizeState_(JSON.parse(String(rows[i][1])));}catch(err){continue;}
+    var pending=source.completionOutbox; // Pending events follow the current approved manager if reassigned.
+    if(!pending.length)continue;
+    pending.forEach(function(e){
+      if(!recipient.inbox.some(function(m){return m.id===e.id;})){
+        recipient.inbox.push({id:e.id,from:e.from,title:e.title,at:e.at,pushSent:false,nextRetryAt:0});inboxDirty=true;
+      }
+    });
+    if(inboxDirty){bumpRevision_(recipient);saveState_(sh,targetRow,recipient,managerEmail);inboxDirty=false;delivered=true;}
+    // Re-read current State within the lock; never overwrite other in-flight edits.
+    var transferred={};pending.forEach(function(e){transferred[e.id]=true;});
+    source.completionOutbox=source.completionOutbox.filter(function(e){return !transferred[e.id];});
+    saveState_(sh,row,source,sourceEmail);
+  }
+  return delivered;
+}
+function adminStats_(ss){
+  var accounts=accessRows_(ss),unique={};
+  accounts.forEach(function(r){var e=String(r[0]||'').trim().toLowerCase();if(e)unique[e]=true;});
+  var sh=stateSheet_(ss),last=sh.getLastRow(),total=0;
+  if(last>1)sh.getRange(2,3,last-1,1).getValues().forEach(function(r){
+    try{if(r[0])total+=normalizeState_(JSON.parse(String(r[0]))).totalCreated;}catch(err){}
+  });
+  return {accounts:Object.keys(unique).length,totalCreated:total,
+    note:'Tổng đầu việc được tính từ dữ liệu còn lưu khi nâng cấp và các công việc đăng ký sau đó.'};
+}
 function runAction_(req){
   var action=String(req.action||''),d=req.data||{};
   var ss=book_(),info=checkAccess_(ss,req.actor);
   // Token refresh: verify Access without loading or creating a State row.
   if(action==='authorize')return {view:{authorized:true},sync:false,changed:false};
+  if(action==='adminStats'){
+    if(!isAdmin_(info.role))throw fail_('FORBIDDEN','Bạn không có quyền xem tổng quan quản trị.');
+    return {view:{adminStats:adminStats_(ss)},sync:false,changed:false};
+  }
   var item=readState_(ss,req.actor,action!=='status');
   if(action==='status')return {view:{revision:item?item.profile.revision:0},sync:false,changed:false};
   var p=item.profile,sh=stateSheet_(ss),dirty=false;
   if(p.externalId!==req.actor.externalId){p.externalId=req.actor.externalId;dirty=true;}
   if(action==='load'||action==='sync'){
     if(dirty)saveState_(sh,item.row,p,info.email);
-    return {view:publicView_(p,info,req.actor.externalId),sync:action==='sync',changed:false};
+    var deliveredForManager=false;
+    // First manager login creates their State row; deliver queued events on subsequent loads too.
+    if(accessRows_(ss).some(function(r){return String(r[4]||'').trim().toLowerCase()===info.email;})){
+      try{deliveredForManager=deliverOutbox_(ss,info.email);var updated=readState_(ss,req.actor,false);if(updated)p=updated.profile;}
+      catch(err){console.error('Deliver inbox:',err.message||err);}
+    }
+    return {view:publicView_(p,info,req.actor.externalId),sync:action==='sync',changed:false,
+      managerPushEmail:deliveredForManager?info.email:''};
   }
   if(action==='setDefaultTime'){
     if(!validTime_(d.time))throw fail_('BAD_REQUEST','Giờ không hợp lệ.');
@@ -184,7 +256,7 @@ function runAction_(req){
     if(existing)prepareCancellation_(p,existing);
     var task=existing||{id:Utilities.getUuid()};
     task.title=title;task.dueDate=due;task.time=time;task.deleted=false;task.lastError='';task.slots=slotsFor_(task);
-    if(!existing)p.tasks.push(task);
+    if(!existing){p.tasks.push(task);p.totalCreated++;}
     bumpRevision_(p);
     saveState_(sh,item.row,p,info.email);
     var view=publicView_(p,info,req.actor.externalId);
@@ -210,18 +282,15 @@ function runAction_(req){
       seen[key]=true;
       // Deletion is deliberate: importing the same source never silently restores it.
       var matched=p.tasks.find(function(t){return t.source==='icpv'&&t.sourceKey===key;});
-      if(matched&&matched.deleted){note('Nhiệm vụ đã được người dùng xóa trong Nhắc việc.');continue;}
+      if((matched&&matched.deleted)||p.deletedSourceKeys.indexOf(key)!==-1){note('Nhiệm vụ đã được xóa trong Nhắc việc.');continue;}
       var time=matched?matched.time:p.defaultTime;
       if(due<today||dateMs_(due,time,0)<=now+30000||dateMs_(due,time,0)>maxDue){
         note('Hạn đã qua hoặc vượt giới hạn ba năm.');continue;
       }
       if(matched){
         if(matched.dueDate===due){summary.unchanged++;continue;}
-        prepareCancellation_(p,matched);
-        matched.dueDate=due;matched.slots=slotsFor_(matched);matched.lastError='';
-        // Preserve any short personal display title and individually chosen reminder hour.
-        summary.updated++;changedTasks.push(matched);
-        continue;
+        // The user's individually edited deadline and reminders must not be overwritten.
+        note('Thời hạn iCPV đã thay đổi; kiểm tra và sửa trong Nhắc việc nếu cần.');continue;
       }
       // Never automatically claim a manually created task with the same title.
       if(p.tasks.some(function(t){return !t.deleted&&t.title.toLowerCase()===title.toLowerCase();})){
@@ -232,7 +301,7 @@ function runAction_(req){
       }
       var task={id:Utilities.getUuid(),source:'icpv',sourceKey:key,title:title,
         dueDate:due,time:time,deleted:false,lastError:''};
-      task.slots=slotsFor_(task);p.tasks.push(task);
+      task.slots=slotsFor_(task);p.tasks.push(task);p.totalCreated++;
       summary.added++;changedTasks.push(task);
     }
     if(changedTasks.length){
@@ -240,7 +309,7 @@ function runAction_(req){
     }else if(dirty)saveState_(sh,item.row,p,info.email);
     var importView=publicView_(p,info,req.actor.externalId);
     importView.importSummary=summary;
-    importView.notice='Đồng bộ: '+summary.added+' mới, '+summary.updated+' thay hạn, '+summary.unchanged+' không đổi, '+summary.skipped+' bỏ qua.';
+    importView.notice='Đã thêm '+summary.added+' công việc mới; '+summary.unchanged+' công việc đã có; '+summary.skipped+' cần kiểm tra.';
     // Do not call OneSignal while answering a multi-item import: browser requests
     // one separate sync; the hourly trigger remains the durable fallback.
     return {view:importView,sync:changedTasks.length>0,urgentSync:false,
@@ -249,16 +318,37 @@ function runAction_(req){
           return changedTasks.some(function(c){return c.id===t.id;});
         })}:null};
   }
+  if(action==='dismissNotification'){
+    requireRevision_(d,p);
+    var msg=p.inbox.find(function(n){return n.id===d.id&&!n.dismissed;});
+    if(!msg)throw fail_('BAD_REQUEST','Không tìm thấy thông báo cần xóa.');
+    msg.dismissed=true;bumpRevision_(p);saveState_(sh,item.row,p,info.email);
+    return {view:publicView_(p,info,req.actor.externalId),sync:false,changed:true,
+      change:{type:'inboxChanged'}};
+  }
   if(action==='remove'){
     requireRevision_(d,p);
     var target=p.tasks.find(function(t){return t.id===d.id&&!t.deleted;});
     if(!target)throw fail_('BAD_REQUEST','Không tìm thấy công việc cần xóa.');
+    // mode=discard is a deliberately explicit exception for accidental/manual entries.
+    var completed=d.mode==='completed'; // Older cached v1.4 clients remain deletion-only during rollout.
+    var manager=completed&&!isManagerRole_(info.role)&&info.managerEmail!==info.email?findActiveManager_(ss,info.managerEmail):null;
     prepareCancellation_(p,target);target.deleted=true;bumpRevision_(p);
+    if(target.source==='icpv'&&target.sourceKey&&p.deletedSourceKeys.indexOf(target.sourceKey)===-1)
+      p.deletedSourceKeys.push(target.sourceKey);
+    if(manager){
+      p.completionOutbox.push({id:Utilities.getUuid(),from:info.name,title:target.title.slice(0,90),
+        at:new Date().toISOString(),managerEmail:manager.email});
+    }
     var urgentCancel=p.cancellations.some(function(c){return c.at>Date.now()+30000&&c.at<=Date.now()+90*60000;});
     saveState_(sh,item.row,p,info.email);
+    if(manager){try{deliverOutbox_(ss,manager.email);}catch(err){console.error('Manager delivery:',err.message||err);}}
     var out=publicView_(p,info,req.actor.externalId);
-    out.notice=p.cancellations.length?'Đã ẩn công việc. Một số lệnh hủy sẽ được thử lại tự động.':'Đã xóa công việc.';
-    return {view:out,sync:true,urgentSync:urgentCancel,changed:true,change:{type:'remove',id:target.id}};
+    out.notice=!completed?(d.mode==='discard'?'Đã xóa công việc nhập nhầm.':'Đã xóa công việc.'):manager?
+      'Đã ghi nhận hoàn thành. Thông tin đã được chuyển đến Trưởng phòng.':
+      'Đã xóa công việc. Chưa có Trưởng phòng được cấu hình để nhận thông báo.';
+    return {view:out,sync:true,urgentSync:urgentCancel,changed:true,managerPushEmail:manager?manager.email:'',
+      change:{type:'remove',id:target.id}};
   }
   throw fail_('BAD_REQUEST','Hành động không được hỗ trợ.');
 }
@@ -285,7 +375,16 @@ function createNotification_(slot,task,externalId){
 function cancelNotification_(id){
   return oneSignal_('delete','/notifications/'+encodeURIComponent(id)+'?app_id='+encodeURIComponent(prop_('ONESIGNAL_APP_ID')));
 }
+function createManagerNotification_(notice,externalId){
+  return oneSignal_('post','/notifications',{
+    app_id:prop_('ONESIGNAL_APP_ID'),target_channel:'push',include_aliases:{external_id:[externalId]},
+    headings:{en:'Nhân viên đã hoàn thành công việc'},
+    contents:{en:notice.from+' đã hoàn thành: '+notice.title.slice(0,65)+'. Vui lòng vào iCPV chấm điểm.'},
+    url:prop_('WEB_URL'),idempotency_key:notice.id
+  });
+}
 function findSlot_(p,key){
+  for(var h=0;h<p.inbox.length;h++)if(p.inbox[h].id===key)return {slot:p.inbox[h],type:'manager',parent:null};
   for(var i=0;i<p.cancellations.length;i++)if(p.cancellations[i].key===key)return {slot:p.cancellations[i],type:'cancel',parent:null};
   for(var j=0;j<p.tasks.length;j++)for(var k=0;k<(p.tasks[j].slots||[]).length;k++)
     if(p.tasks[j].slots[k].key===key)return {slot:p.tasks[j].slots[k],type:'create',parent:p.tasks[j]};
@@ -310,15 +409,28 @@ function claimJobs_(sh,row,email,maxCount,force){
   }
   if(p.cancellations.length)hasCancellation=true;
   if(!hasCancellation){
-    for(var j=0;j<p.tasks.length&&jobs.length<maxCount;j++){
+    // Preserve the existing due-date scheduler: leave one slot for manager alerts.
+    var dueBudget=maxCount;
+    var hasManagerPending=p.externalId&&p.inbox.some(function(m){return !m.dismissed&&!m.pushSent&&
+      (!m.leaseUntil||m.leaseUntil<=now)&&(!m.nextRetryAt||m.nextRetryAt<=now||force);});
+    if(hasManagerPending)dueBudget=Math.max(0,maxCount-1);
+    for(var j=0;j<p.tasks.length&&jobs.length<dueBudget;j++){
       var t=p.tasks[j];if(t.deleted)continue;
-      for(var k=0;k<(t.slots||[]).length&&jobs.length<maxCount;k++){
+      for(var k=0;k<(t.slots||[]).length&&jobs.length<dueBudget;k++){
         var s=t.slots[k];
         if(s.id||s.at<=now+60000||s.at>horizon||(s.leaseUntil&&s.leaseUntil>now)||
           (s.nextRetryAt&&s.nextRetryAt>now&&!force))continue;
         s.attempted=true;s.leaseUntil=now+CLAIM_MS;changed=true;
         jobs.push({key:s.key,kind:'create',slot:JSON.parse(JSON.stringify(s)),task:{title:t.title,dueDate:t.dueDate},externalId:p.externalId});
       }
+    }
+    // Reserve at most one manager push in each shared batch; due-date jobs retain priority.
+    for(var h=0;h<p.inbox.length&&jobs.length<maxCount;h++){
+      var m=p.inbox[h];
+      if(m.dismissed||m.pushSent||!p.externalId||(m.leaseUntil&&m.leaseUntil>now)||
+        (m.nextRetryAt&&m.nextRetryAt>now&&!force))continue;
+      m.leaseUntil=now+CLAIM_MS;changed=true;
+      jobs.push({key:m.id,kind:'manager',slot:JSON.parse(JSON.stringify(m)),externalId:p.externalId});
     }
   }
   if(changed)saveState_(sh,row,p,email);
@@ -338,7 +450,14 @@ function finishJobs_(sh,row,email,results){
       if(found.parent)found.parent.lastError='Chưa lên lịch được: '+String(r.error).slice(0,90);
       return;
     }
-    if(r.kind==='cancel'){
+      if(r.kind==='manager'){
+        if(found.type==='manager'){
+          if(r.id)s.pushSent=true;
+          else s.nextRetryAt=now+6*CLOCK_MS;
+        }
+        return;
+      }
+      if(r.kind==='cancel'){
       if(found.type==='cancel')p.cancellations=p.cancellations.filter(function(x){return x.key!==r.key;});
       return;
     }
@@ -359,7 +478,8 @@ function performJobs_(jobs){
   return jobs.map(function(j){
     var result={key:j.key,leaseUntil:j.slot.leaseUntil,kind:j.kind,id:'',error:''};
     try{
-      if(j.kind==='cancel')cancelNotification_(j.slot.id);
+      if(j.kind==='manager')result.id=String(createManagerNotification_(j.slot,j.externalId).id||'');
+      else if(j.kind==='cancel')cancelNotification_(j.slot.id);
       else {
         var response=createNotification_(j.slot,j.task,j.externalId);
         result.id=String(response.id||'');
@@ -383,6 +503,16 @@ function syncAccount_(actor,maxCalls,force){
     var ss=book_();finishJobs_(stateSheet_(ss),jobContext.row,jobContext.email,results);
   });
 }
+function syncManagerByEmail_(email,maxCalls){
+  var context=withLock_(function(){
+    var ss=book_(),sh=stateSheet_(ss),row=stateRowByEmail_(sh,email);
+    if(!row||!findActiveManager_(ss,email))return null;
+    return {row:row,jobs:claimJobs_(sh,row,email,maxCalls,false)};
+  });
+  if(!context||!context.jobs.length)return;
+  var result=performJobs_(context.jobs);
+  withLock_(function(){var ss=book_();finishJobs_(stateSheet_(ss),context.row,email,result);});
+}
 function doPost(e){
   try{
     if(!e||!e.postData||!e.postData.contents||e.postData.contents.length>62000)
@@ -396,6 +526,10 @@ function doPost(e){
     var syncedInline=false;
     if(result.sync&&(request.action==='sync'||result.urgentSync)){
       try{syncAccount_(request.actor,4,request.action==='sync');syncedInline=true;}catch(syncErr){console.error('Deferred sync:',syncErr.message||syncErr);}
+      // Trigger a narrowly targeted manager push; the hourly trigger is the fallback.
+      if(result.managerPushEmail){
+        try{syncManagerByEmail_(result.managerPushEmail,2);}catch(managerErr){console.error('Deferred manager push:',managerErr.message||managerErr);}
+      }
       // The latest view can be refreshed with a read. Avoid a duplicate Sheets read on each write;
       // hourly sync retries in the background. Frontend explicitly labels pending work.
       // Nonurgent user mutations are queued for a separate nonblocking sync request.
@@ -430,11 +564,13 @@ function syncScheduledNotifications(){
     var needCreate=!snapshot.cancellations.length&&snapshot.tasks.some(function(t){return !t.deleted&&(t.slots||[]).some(function(s){
       return !s.id&&s.at>now+60000&&s.at<=horizon&&(!s.leaseUntil||s.leaseUntil<=now)&&(!s.nextRetryAt||s.nextRetryAt<=now);
     });});
-    var needRevoke=!allowed[email]&&snapshot.tasks.some(function(t){return !t.deleted;});
+      var needManager=allowed[email]&&snapshot.inbox.some(function(m){return !m.dismissed&&!m.pushSent&&
+        (!m.leaseUntil||m.leaseUntil<=now)&&(!m.nextRetryAt||m.nextRetryAt<=now);});
+      var needRevoke=!allowed[email]&&snapshot.tasks.some(function(t){return !t.deleted;});
     var needClean=!snapshot.cancellations.length&&snapshot.tasks.some(function(t){
       return t.deleted||dateMs_(t.dueDate,t.time,0)<=now-30*DAY_MS;
     });
-    if(!needCancel&&!needCreate&&!needRevoke&&!needClean)continue;
+      if(!needCancel&&!needCreate&&!needManager&&!needRevoke&&!needClean)continue;
     try{
       claimed=withLock_(function(){
         var raw=String(sh.getRange(row,3).getValue()||'');if(!raw)return [];

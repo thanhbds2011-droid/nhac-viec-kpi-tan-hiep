@@ -69,7 +69,8 @@ function backendActionHarness(){
   const profile=ctx.newState_();profile.externalId='th_'+ 'a'.repeat(44);
   let writes=0;
   ctx.book_=()=>({});
-  ctx.checkAccess_=()=>({email:'a@example.com',name:'Viên chức A'});
+  ctx.checkAccess_=()=>({email:'a@example.com',name:'Viên chức A',managerEmail:''});
+  ctx.accessRows_=()=>[];
   ctx.readState_=()=>({row:2,profile});
   ctx.stateSheet_=()=>({});
   ctx.saveState_=()=>{writes++;};

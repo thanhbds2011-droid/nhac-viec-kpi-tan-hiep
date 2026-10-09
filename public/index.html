@@ -13,10 +13,10 @@
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
-  <link rel="stylesheet" href="/styles.css?v=1.4.1" />
+  <link rel="stylesheet" href="/styles.css?v=1.5.0" />
   <script defer src="https://accounts.google.com/gsi/client"></script>
   <script defer src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js"></script>
-  <script defer src="/app.js?v=1.4.1"></script>
+  <script defer src="/app.js?v=1.5.0"></script>
 </head>
 <body>
 <div class="shell">
@@ -44,6 +44,9 @@
         <div class="welcome"><span class="welcome-title">Xin chào, <strong id="displayName">bạn</strong></span>
           <span id="accountEmail" class="account-email"></span></div>
         <div class="task-total"><strong id="taskCount">0</strong><span>việc theo dõi</span></div>
+        <div class="desktop-tools"><button type="button" id="desktopJobsBtn" class="secondary small">Công việc</button>
+          <button type="button" id="desktopNoticeBtn" class="secondary small">Thông báo</button>
+          <button type="button" id="desktopAdminBtn" class="secondary small hide">Tổng quan quản trị</button></div>
       </section>
       <section class="notification-bar" aria-label="Trạng thái thông báo">
         <div class="notification-info"><span class="status-dot" id="pushDot" aria-hidden="true"></span>
@@ -97,14 +100,16 @@
         </section>
         <section class="panel detail-panel mobile-pane" id="notificationsPane" aria-label="Thông báo">
           <div class="panel-header"><h2>Thông báo</h2></div>
+          <div class="inbox-wrap"><h3>Nhân viên đã hoàn thành <span id="inboxCount">0</span></h3>
+            <div id="managerInbox" class="inbox-list">Không có thông báo cần xử lý.</div></div>
           <div class="inform-card"><span class="inform-icon" aria-hidden="true">🔔</span>
             <strong>Thông báo nhắc việc trên thiết bị</strong>
-            <p>Thông báo được gửi qua OneSignal theo lịch đã đăng ký. Ứng dụng không lưu lịch sử các thông báo đã hiển thị trên điện thoại.</p>
+            <p>Thông báo nhắc hạn được gửi tự động theo lịch. Thông báo hoàn thành của nhân viên được lưu bên trên cho đến khi bạn xóa.</p>
             <p id="notificationSummary" class="inline-info"></p>
             <button type="button" id="enablePushAlt" class="primary">Kiểm tra / bật thông báo</button>
             <p class="push-help">Mỗi thiết bị và trình duyệt phải cấp quyền riêng. Chrome/Edge: mở website HTTPS và bấm Bật thông báo. iPhone: cài ứng dụng ra Màn hình chính (iOS 16.4+) rồi mở từ biểu tượng đó.</p>
             <details class="push-debug"><summary>Kiểm tra trạng thái thiết bị</summary><p id="pushDiagnostics" role="status">Đang kiểm tra…</p>
-            <p>Thông báo đã bật không đồng nghĩa lịch gửi chắc chắn thành công. Nếu chưa nhận tin, kiểm tra OneSignal → Audience → Subscriptions và lịch gửi trên Dashboard.</p></details>
+            <p>Thông báo đã bật không đồng nghĩa lịch gửi chắc chắn thành công. Nếu chưa nhận được thông báo, vui lòng liên hệ người hỗ trợ kỹ thuật để kiểm tra.</p></details>
           </div>
         </section>
         <section class="panel detail-panel mobile-pane" id="profilePane" aria-label="Cá nhân">
@@ -112,10 +117,17 @@
           <div class="profile-card"><span class="avatar" id="profileAvatar">NV</span>
             <div><strong id="profileName">Viên chức</strong><p id="profileEmail"></p></div></div>
           <button type="button" class="menu-row" id="profileDefaultTime">⚙️ <span>Thay đổi giờ mặc định</span><span>›</span></button>
+          <button type="button" id="adminShortcut" class="menu-row hide">📊 <span>Tổng quan quản trị</span><span>›</span></button>
           <button type="button" class="menu-row" id="profilePush">🔔 <span>Trạng thái thông báo</span><span>›</span></button>
-          <p class="profile-version">Phiên bản 1.4.1 · Nhắc việc KPI – Tân Hiệp</p>
+          <p class="profile-version">Phiên bản 1.5.0 · Nhắc việc KPI – Tân Hiệp</p>
           <button type="button" class="profile-signout" id="profileSignout">Đăng xuất</button>
           <p class="install-help" id="installHelp">iPhone: Trong Safari, chọn Chia sẻ → Thêm vào Màn hình chính. Android: chọn Cài đặt ứng dụng / Thêm vào Màn hình chính.</p>
+        </section>
+        <section class="panel detail-panel mobile-pane" id="adminPane" aria-label="Tổng quan quản trị">
+          <div class="panel-header"><h2>Tổng quan ứng dụng</h2><button type="button" class="secondary small" id="adminBack">Quay lại</button></div>
+          <div class="admin-cards"><div><strong id="adminAccounts">—</strong><span>Tổng tài khoản</span></div>
+            <div><strong id="adminTasks">—</strong><span>Đầu việc đã đăng ký</span></div></div>
+          <p id="adminNote" class="section-help"></p>
         </section>
       </div>
       <button type="button" id="tabCreate" class="fab" aria-label="Thêm công việc" title="Thêm công việc">+</button>
@@ -138,7 +150,7 @@
 <dialog id="confirmDialog" aria-labelledby="confirmHeading"><form method="dialog" class="dialog-inner">
   <h3 id="confirmHeading">Xóa công việc?</h3><p id="confirmText"></p>
   <div class="dialog-actions"><button type="submit" value="cancel" class="secondary">Giữ lại</button>
-    <button type="submit" value="confirm" class="danger">Xóa công việc</button></div>
+    <button type="submit" value="discard" class="secondary">Xóa do nhập nhầm</button><button type="submit" value="confirm" class="danger">Đã hoàn thành, xóa</button></div>
 </form></dialog>
 <dialog id="importDialog" class="import-dialog" aria-labelledby="importHeading">
   <div class="import-inner">
@@ -146,7 +158,7 @@
     <p id="importInfo"></p>
     <div id="importPreview" class="import-list"></div>
     <label class="import-consent"><input type="checkbox" id="importAccountConfirm"> Tôi xác nhận đây là nhiệm vụ thuộc chính tài khoản Nhắc việc <strong id="importAccount"></strong> và được phép chuyển dữ liệu.</label>
-    <p class="import-disclaimer">Chỉ nhập các nhiệm vụ bạn được phép chuyển dữ liệu. Công việc được đối chiếu theo dấu vân tay tên gốc; khi tên gốc trên iCPV bị sửa, cần rà soát tránh trùng.</p>
+    <p class="import-disclaimer">Chỉ nhập công việc bạn được phép chuyển dữ liệu. Khi tên công việc trên iCPV thay đổi, vui lòng kiểm tra lại để tránh nhập trùng.</p>
     <div class="form-actions"><button id="importCancel" type="button" class="secondary">Hủy</button><button id="importApply" type="button" class="primary">Xác nhận đồng bộ</button></div>
   </div>
 </dialog>
