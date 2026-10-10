@@ -676,11 +676,27 @@ function syncAccount_(actor,maxCalls,force){
     var ss=book_();finishJobs_(stateSheet_(ss),jobContext.row,jobContext.email,results);
   });
 }
+// Only claim manager completion alerts here; an unrelated due-date cancellation
+// must not postpone a newly completed employee task. Normal due-date processing is unchanged.
+function claimManagerAlerts_(sh,row,email,maxCount){
+  var raw=String(sh.getRange(row,3).getValue()||''),p=normalizeState_(raw?JSON.parse(raw):newState_());
+  if(!p.externalId)return [];
+  var now=Date.now(),jobs=[],changed=false;
+  for(var i=0;i<p.inbox.length&&jobs.length<maxCount;i++){
+    var m=p.inbox[i];
+    if(m.dismissed||m.pushSent||(m.leaseUntil&&m.leaseUntil>now)||
+      (m.nextRetryAt&&m.nextRetryAt>now))continue;
+    m.leaseUntil=now+CLAIM_MS;changed=true;
+    jobs.push({key:m.id,kind:'manager',slot:JSON.parse(JSON.stringify(m)),externalId:p.externalId});
+  }
+  if(changed)saveState_(sh,row,p,email);
+  return jobs;
+}
 function syncManagerByEmail_(email,maxCalls){
   var context=withLock_(function(){
     var ss=book_(),sh=stateSheet_(ss),row=stateRowByEmail_(sh,email);
     if(!row||!findActiveManager_(ss,email))return null;
-    return {row:row,jobs:claimJobs_(sh,row,email,maxCalls,false)};
+    return {row:row,jobs:claimManagerAlerts_(sh,row,email,maxCalls)};
   });
   if(!context||!context.jobs.length)return;
   var result=performJobs_(context.jobs);
@@ -699,13 +715,15 @@ function doPost(e){
     var syncedInline=false;
     if(result.sync&&(request.action==='sync'||result.urgentSync)){
       try{syncAccount_(request.actor,4,request.action==='sync');syncedInline=true;}catch(syncErr){console.error('Deferred sync:',syncErr.message||syncErr);}
-      // Trigger a narrowly targeted manager push; the hourly trigger is the fallback.
-      if(result.managerPushEmail){
-        try{syncManagerByEmail_(result.managerPushEmail,2);}catch(managerErr){console.error('Deferred manager push:',managerErr.message||managerErr);}
-      }
       // The latest view can be refreshed with a read. Avoid a duplicate Sheets read on each write;
       // hourly sync retries in the background. Frontend explicitly labels pending work.
       // Nonurgent user mutations are queued for a separate nonblocking sync request.
+    }
+    // Manager completion alerts must not depend on the EMPLOYEE's urgent due-date cancellation.
+    // The completion event and target inbox were committed above, under lock. Deliver to the
+    // manager immediately when possible; the existing hourly trigger remains the retry fallback.
+    if(result.managerPushEmail){
+      try{syncManagerByEmail_(result.managerPushEmail,2);}catch(managerErr){console.error('Deferred manager push:',managerErr.message||managerErr);}
     }
     return jsonOutput_({ok:true,result:result.view,changed:!!result.changed,change:result.change||null,
       needsSync:!!result.sync&&!syncedInline});
