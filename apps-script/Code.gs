@@ -417,9 +417,6 @@ function runAction_(req){
     requireRevision_(d,p);
     var existing=d.id?p.tasks.find(function(t){return t.id===d.id&&!t.deleted;}):null;
     if(d.id&&!existing)throw fail_('BAD_REQUEST','Không tìm thấy công việc cần sửa.');
-    if(p.tasks.some(function(t){return !t.deleted&&t.id!==(existing&&existing.id)&&
-      t.title.toLowerCase()===title.toLowerCase()&&t.dueDate===due&&t.time===time;}))
-      throw fail_('CONFLICT','Bạn đã đăng ký công việc này với cùng ngày và giờ.');
     if(!existing&&p.tasks.filter(function(t){return !t.deleted&&t.dueDate>=vnToday_();}).length>=MAX_ACTIVE)
       throw fail_('BAD_REQUEST','Tài khoản đang có quá nhiều lịch nhắc (50). Hãy xóa những lịch không cần thiết.');
     if(existing&&existing.title===title&&existing.dueDate===due&&existing.time===time){
@@ -488,6 +485,72 @@ function runAction_(req){
     return {view:importView,sync:changedTasks.length>0,urgentSync:false,
       changed:changedTasks.length>0,change:changedTasks.length?{
         type:'importBatch',tasks:importView.tasks.filter(function(t){
+          return changedTasks.some(function(c){return c.id===t.id;});
+        })}:null};
+  }
+  // v1.7: deliberate review of the CURRENT visible iCPV page. Never auto-merge by title.
+  if(action==='reviewIcpv'){
+    requireRevision_(d,p);
+    if(!Array.isArray(d.decisions)||!d.decisions.length||d.decisions.length>30)
+      throw fail_('BAD_REQUEST','Hãy chọn từ 1 đến 30 công việc để xử lý.');
+    var today=vnToday_(),now=Date.now(),limit=now+3*366*DAY_MS;
+    var touched={},seenSource={},summary={added:0,updated:0,unchanged:0,skipped:0,notes:[]};
+    var planned=[];
+    // Validate the entire batch before mutating the account: all-or-nothing behavior.
+    d.decisions.forEach(function(x,i){
+      var kind=String(x&&x.kind||''),key=String(x&&x.sourceKey||'');
+      var title=String(x&&x.title||'').trim(),due=String(x&&x.dueDate||'');
+      if(['add','update'].indexOf(kind)===-1||!/^icpv:[a-f0-9]{64}$/.test(key)||
+         !title||title.length>90||!validDay_(due))
+        throw fail_('BAD_REQUEST','Nhiệm vụ được chọn tại dòng '+(i+1)+' không hợp lệ.');
+      if(seenSource[key])throw fail_('BAD_REQUEST','Một nhiệm vụ đang được chọn nhiều lần.');
+      seenSource[key]=true;
+      var target=null,time=p.defaultTime;
+      if(kind==='update'){
+        target=p.tasks.find(function(t){return !t.deleted&&t.id===x.targetId;});
+        if(!target||touched[target.id])throw fail_('BAD_REQUEST','Hãy chọn đúng công việc đang theo dõi để cập nhật.');
+        touched[target.id]=true;time=target.time;
+      }
+      if(due<today||dateMs_(due,time,0)<=now+30000||dateMs_(due,time,0)>limit)
+        throw fail_('BAD_REQUEST','Thời hạn công việc ở dòng '+(i+1)+' đã quá hoặc không hợp lệ.');
+      planned.push({kind:kind,key:key,title:title,due:due,time:time,target:target});
+    });
+    var active=p.tasks.filter(function(t){return !t.deleted&&t.dueDate>=today;}).length;
+    var added=planned.filter(function(x){return x.kind==='add';}).length;
+    if(active+added>MAX_ACTIVE)throw fail_('BAD_REQUEST','Tài khoản sẽ vượt giới hạn 50 công việc chưa quá hạn.');
+    var changedTasks=[];
+    planned.forEach(function(x){
+      if(x.kind==='update'){
+        var t=x.target;
+        if(t.title===x.title&&t.dueDate===x.due){
+          if(t.sourceKey!==x.key||t.source!=='icpv'){
+            t.source='icpv';t.sourceKey=x.key;changedTasks.push(t);summary.updated++;
+          }else summary.unchanged++;
+          return;
+        }
+        prepareCancellation_(p,t);t.title=x.title;t.dueDate=x.due;t.slots=slotsFor_(t);t.lastError='';
+        // Only explicitly chosen items are linked to the new source description.
+        t.source='icpv';t.sourceKey=x.key;
+        summary.updated++;changedTasks.push(t);
+      }else{
+        var already=p.tasks.some(function(t){return !t.deleted&&t.source==='icpv'&&t.sourceKey===x.key;});
+        // Explicit ADD is allowed even with the same name/key: use a separate manual copy
+        // rather than silently merging it into an existing iCPV-linked job.
+        var task={id:Utilities.getUuid(),source:already?'manual':'icpv',
+          sourceKey:already?'':x.key,title:x.title,dueDate:x.due,time:x.time,
+          deleted:false,lastError:'',slots:[]};
+        task.slots=slotsFor_(task);p.tasks.push(task);p.totalCreated++;
+        summary.added++;changedTasks.push(task);
+      }
+    });
+    if(changedTasks.length){bumpRevision_(p);saveState_(sh,item.row,p,info.email);}
+    else if(dirty)saveState_(sh,item.row,p,info.email);
+    var reviewView=publicView_(p,info,req.actor.externalId);
+    reviewView.importSummary=summary;
+    reviewView.notice='Đã thêm '+summary.added+' công việc, cập nhật '+summary.updated+' công việc. '+summary.unchanged+' công việc giữ nguyên.';
+    return {view:reviewView,sync:changedTasks.length>0,urgentSync:false,
+      changed:changedTasks.length>0,change:changedTasks.length?{
+        type:'importBatch',tasks:reviewView.tasks.filter(function(t){
           return changedTasks.some(function(c){return c.id===t.id;});
         })}:null};
   }

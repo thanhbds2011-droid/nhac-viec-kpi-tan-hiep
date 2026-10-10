@@ -1,16 +1,18 @@
-NHẮC VIỆC KPI - TIỆN ÍCH CHROME ĐỒNG BỘ iCPV
+NHẮC VIỆC KPI TÂN HIỆP – TIỆN ÍCH CHROME V1.7.0
 
-1. GIẢI NÉN toàn bộ thư mục này; không tải ZIP trực tiếp làm tiện ích.
-2. Chrome -> chrome://extensions -> Developer mode -> Load unpacked.
-3. Chọn thư mục này (bên trong có manifest.json).
-4. Ghim biểu tượng tiện ích.
-5. Đăng nhập iCPV -> Quản lý nhiệm vụ -> bấm biểu tượng tiện ích.
-6. Xác nhận quyền đọc/chuyển dữ liệu -> Lấy nhiệm vụ -> xem thử.
-7. Bấm Mở Nhắc việc -> đăng nhập Google -> xem lại tên/hạn -> xác nhận đồng bộ.
+1. Mở chrome://extensions, bật Chế độ dành cho nhà phát triển.
+2. Tải tiện ích đã có bằng nút Tải lại tại thẻ tiện ích (nếu đã cài).
+   Nếu đang sử dụng bộ cũ không phải trong thư mục này, chép đè thư mục tiện ích mới trước khi Tải lại.
+3. Đăng nhập Nhắc việc KPI bằng Chrome cùng hồ sơ trình duyệt.
+4. Mở trang Quản lý nhiệm vụ iCPV. Nhấp biểu tượng tiện ích Chrome.
+5. Tích ô xác nhận quyền dùng dữ liệu. Chọn 'Bật kiểm tra tự động khi mở iCPV'.
+   Chrome sẽ hỏi quyền cho đúng nguồn iCPV được ghim. Chỉ cấp khi đây là trang chính thức và được cơ quan cho phép.
+6. Tải lại trang danh sách iCPV. Tiện ích chỉ theo dõi bảng đang hiển thị.
+7. Khi xuất hiện thông báo khác biệt, nhấn 'Xem thay đổi'; xác nhận cho phép chuyển tên và hạn nhiệm vụ.
+8. Ở Nhắc việc, xác nhận đúng tài khoản rồi chọn: Cập nhật việc đã có / Thêm mới / Bỏ qua.
 
-BẮT BUỘC: phải cập nhật backend/frontend Nhắc việc lên v1.4.0 TRƯỚC KHI sử dụng tiện ích.
-BẢN NÀY chưa được kiểm thử với HTML của iCPV thật. Nếu tiện ích không đọc được
-bảng, không tự khai thác API nội bộ. Chỉ dùng khi cơ quan cho phép đưa dữ liệu
-công vụ vào hệ thống Tân Hiệp.
-
-Chi tiết: docs/CAP-NHAT-V1.4.0-DONG-BO-ICPV.md trong gói TOÀN BỘ.
+LƯU Ý: Lần đầu theo dõi một trang chỉ tạo mốc so sánh, không khẳng định đã phát hiện thay đổi.
+Không tự quét trang khác, không chạy khi đóng Chrome, không dùng API iCPV.
+Người dùng luôn có thể đồng bộ thủ công trong cửa sổ tiện ích.
+Nếu website Nhắc việc mở trên trình duyệt/hồ sơ khác, bạn phải đăng nhập Nhắc việc bằng đúng Chrome đã cài tiện ích.
+Không tự đổi tên hoặc xóa nhiệm vụ trên iCPV.

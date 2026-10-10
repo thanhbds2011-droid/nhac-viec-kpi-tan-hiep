@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Nhắc việc KPI – Đồng bộ iCPV",
-  "version": "1.0.0",
-  "description": "Đọc tên và hạn nhiệm vụ trong bảng iCPV đang mở, chuyển sang Nhắc việc KPI sau khi người dùng xác nhận.",
+  "version": "1.1.0",
+  "description": "Phát hiện thay đổi khi mở bảng iCPV đã cấp quyền; bạn tự chọn thêm mới, cập nhật hoặc bỏ qua.",
   "minimum_chrome_version": "114",
   "permissions": [
     "activeTab",
@@ -34,5 +34,8 @@
   ],
   "background": {
     "service_worker": "background.js"
-  }
+  },
+  "optional_host_permissions": [
+    "https://*/*"
+  ]
 }

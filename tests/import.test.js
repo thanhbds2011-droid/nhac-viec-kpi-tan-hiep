@@ -61,7 +61,7 @@ test('Từ chối dữ liệu sai, hạn đã qua, file trùng key, giới hạn
  assert.throws(()=>h.run(Array(31).fill({sourceKey:KEY1,title:'A',dueDate:'2026-12-20'})),/30 nhiệm vụ/);
  assert.throws(()=>h.run([{sourceKey:KEY1,title:'A',dueDate:'2026-12-20'}],0),/thiết bị khác/);
 });
-test('Extractor: đọc đúng cột khi cuộn ngang, không nhầm ngày tạo, loại trừ tên trùng',async()=>{
+test('Extractor: giữ hai công việc trùng tên nhưng khác đầu việc; đọc đúng hạn',async()=>{
  const cell=s=>({innerText:s});
  const tr=(cells)=>({getClientRects:()=>[1],querySelectorAll:q=>q.startsWith(':scope > td')?cells:[]});
  const table={getClientRects:()=>[1],querySelectorAll:q=>{
@@ -75,11 +75,11 @@ test('Extractor: đọc đúng cột khi cuộn ngang, không nhầm ngày tạo
  const ctx={location:{protocol:'https:',origin:'https://example.icpv.gov.vn'},
  document:{body:{innerText:'iCPV - TP.HCM | Quản lý nhiệm vụ'},querySelectorAll:q=>q==='table,[role="grid"],[role="table"]'?[table]:[]},
  crypto:crypto.webcrypto,TextEncoder,Date,Uint8Array,Number,Map,String};
- const result=await vm.runInNewContext(fs.readFileSync(path.join(root,'chrome-extension/extract.js'),'utf8'),ctx);
- assert.equal(result.count,3);assert.equal(result.items.length,1);
+ const result=await vm.runInNewContext(fs.readFileSync(path.join(root,'chrome-extension/icpv-reader.js'),'utf8')+'\n'+fs.readFileSync(path.join(root,'chrome-extension/extract.js'),'utf8'),ctx);
+ assert.equal(result.count,3);assert.equal(result.items.length,3);
  assert.equal(result.items[0].dueDate,'2026-12-15');
  assert.equal(result.items[0].title,'Tham mưu văn bản về Quỹ Vì người nghèo');
- assert.equal(result.skippedNames.length,1);
+ assert.notEqual(result.items[1].sourceKey,result.items[2].sourceKey);
  assert.match(result.items[0].sourceKey,/^icpv:[a-f0-9]{64}$/);
 });
 test('Quyền tiện ích giới hạn website đích, không tự lấy cookie hoặc gọi API iCPV',()=>{

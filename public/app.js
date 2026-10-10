@@ -548,6 +548,7 @@ async function signedIn(response){
     if(epoch!==state.sessionEpoch)return;
     if(data.sessionToken)state.sessionToken=data.sessionToken;
     state.user={email:data.email,name:data.name,externalId:data.externalId,realtimeChannel:data.realtimeChannel};
+    window.postMessage({kind:'TAN_HIEP_ICPV_ACCOUNT_CONTEXT_V1',id:data.externalId},location.origin);
     const name=(data.name||data.email||'bạn').trim();
     $('displayName').textContent=name;$('accountEmail').textContent=data.email;
     $('profileName').textContent=name;$('profileEmail').textContent=data.email;
@@ -572,6 +573,7 @@ async function signout(){
     await queueIdentity(async()=>{if(sdkInitPromise){const o=await sdk();await o.logout();}});
   }catch(err){notify('Chưa thể ngắt OneSignal khỏi thiết bị. Hãy kiểm tra trạng thái thông báo trước khi dùng tài khoản khác.',true);}
   if(window.google?.accounts?.id)window.google.accounts.id.disableAutoSelect();
+  window.postMessage({kind:'TAN_HIEP_ICPV_ACCOUNT_CONTEXT_V1',id:''},location.origin);
   state.credential='';state.sessionToken='';state.user=null;state.tasks=[];state.inbox=[];state.deletedSourceKeys=[];state.isAdmin=false;state.managerConfigured=false;state.editingId=null;state.pushBoundAccount='';state.pushError='';
   $('desktopAdminBtn').classList.add('hide');$('appView').classList.add('hide');$('signoutBtn').classList.add('hide');$('loginView').classList.remove('hide');
   $('loginHint').textContent='Bạn đã đăng xuất. Đăng nhập lại để quản lý công việc.';
@@ -627,80 +629,99 @@ async function start(){
     $('loginHint').textContent='Chỉ dành cho tài khoản đã được cấp quyền.';
   }catch(err){$('loginHint').textContent=err.message;notify(err.message,true);}
 }
-// YC-006: In-memory import staging, never accept credentials or write without review.
+// iCPV review: raw page data only arrives after a user-approved transfer.
 let pendingImport=null;
 function receiveImportFromExtension(event){
   if(event.source!==window||event.origin!==location.origin||!state.user)return;
   const data=event.data;
   if(!data||data.kind!=='TAN_HIEP_ICPV_IMPORT_PAYLOAD_V1')return;
-  if(!Array.isArray(data.items)||data.items.length<1||data.items.length>30){
-    notify('Danh sách không hợp lệ hoặc quá 30 nhiệm vụ.',true);return;
+  if(data.accountId&&data.accountId!==state.user.externalId){
+    notify('Dữ liệu được kiểm tra từ tài khoản Nhắc việc khác. Hãy quay lại iCPV sau khi đăng nhập đúng tài khoản.',true);return;
   }
-  const seen=new Set(),clean=[];
+  if(!Array.isArray(data.items)||!data.items.length||data.items.length>30){
+    notify('Danh sách chưa hợp lệ hoặc vượt quá 30 nhiệm vụ.',true);return;
+  }
+  const clean=[];
   for(const input of data.items){
-    if(!input||!/^icpv:[a-f0-9]{64}$/.test(input.sourceKey||'')||
-       !/^\d{4}-\d{2}-\d{2}$/.test(input.dueDate||'')||seen.has(input.sourceKey))continue;
-    seen.add(input.sourceKey);
-    clean.push({sourceKey:input.sourceKey,title:String(input.title||'').slice(0,90).trim(),dueDate:input.dueDate});
+    if(!input||!/^icpv:[a-f0-9]{64}$/.test(input.sourceKey||''))continue;
+    clean.push({sourceKey:input.sourceKey,title:String(input.title||'').slice(0,90).trim(),dueDate:String(input.dueDate||'')});
   }
-  if(!clean.length){notify('Không có nhiệm vụ hợp lệ để xem trước.',true);return;}
-  const known=new Map(state.tasks.filter(t=>t.sourceKey).map(t=>[t.sourceKey,t]));
-  const deleted=new Set(state.deletedSourceKeys);
-  const changes=clean.filter(t=>known.has(t.sourceKey)&&known.get(t.sourceKey).dueDate!==t.dueDate);
-  const fresh=clean.filter(t=>!known.has(t.sourceKey)&&!deleted.has(t.sourceKey));
-  // Source keys are sent by the extension, never trusted for authorization on the server.
-  pendingImport=fresh;
-  if(changes.length){
-    const sample=changes.slice(0,5).map(t=>'• '+t.title.slice(0,50)).join('\n');
-    window.alert('Có '+changes.length+' công việc có thời hạn trên iCPV khác với lịch đang theo dõi.\nHãy kiểm tra và sửa ngày hạn trong Nhắc việc nếu cần:\n'+sample);
-  }
-  if(!fresh.length){notify('Không có công việc mới cần nhập.');return;}
+  if(!clean.length){notify('Không đọc được nhiệm vụ để rà soát.',true);return;}
+  pendingImport=clean;
   $('importAccount').textContent=state.user.email;
   $('importAccountConfirm').checked=false;
   const list=$('importPreview');list.replaceChildren();
-  for(let i=0;i<fresh.length;i++){
-    const t=fresh[i],row=document.createElement('label');row.className='import-row';
-    const check=document.createElement('input');check.type='checkbox';check.checked=true;
-    check.dataset.index=String(i);
-    const content=document.createElement('div'),title=document.createElement('input');
-    title.type='text';title.maxLength=90;title.required=true;title.value=t.title;
-    title.setAttribute('aria-label','Tên ngắn gọn nhiệm vụ '+(i+1));
-    title.addEventListener('click',e=>e.stopPropagation());
-    const deadline=document.createElement('small');deadline.textContent='Hạn: '+vnDate(t.dueDate);
-    content.append(title,deadline);row.append(check,content);list.append(row);
+  const known=new Map(state.tasks.filter(t=>t.sourceKey).map(t=>[t.sourceKey,t]));
+  const deleted=new Set(state.deletedSourceKeys);
+  const active=[...state.tasks].sort((a,b)=>a.title.localeCompare(b.title,'vi'));
+  let initialAdd=0,checkCount=0;
+  for(let i=0;i<clean.length;i++){
+    const t=clean[i],matched=known.get(t.sourceKey),wasDeleted=deleted.has(t.sourceKey);
+    const valid=/^\d{4}-\d{2}-\d{2}$/.test(t.dueDate);
+    const same=matched&&matched.dueDate===t.dueDate&&matched.title===t.title;
+    const action=(!valid||matched||wasDeleted)?'ignore':'add';
+    if(action==='add')initialAdd++;else if(!same)checkCount++;
+    const row=document.createElement('div');row.className='import-row';row.dataset.index=String(i);
+    const content=document.createElement('div');
+    const info=document.createElement('small');
+    info.textContent=!valid?'Chưa đọc được thời hạn — cần kiểm tra trên iCPV.':
+      wasDeleted?'Công việc từng được xóa — không tự khôi phục.':
+      same?'Có thể đã theo dõi — được giữ nguyên.':
+      matched?'Thông tin có thể đã thay đổi — bạn tự rà soát.':
+      'Chưa tìm thấy mục tương ứng — có thể là công việc mới.';
+    const title=document.createElement('input');title.type='text';title.maxLength=90;title.value=t.title;
+    title.setAttribute('aria-label','Tên nhiệm vụ dòng '+(i+1));
+    const due=document.createElement('input');due.type='date';due.value=valid?t.dueDate:'';
+    due.setAttribute('aria-label','Thời hạn dòng '+(i+1));
+    const actionSelect=document.createElement('select');actionSelect.className='action-select';
+    [['ignore','Bỏ qua'],['add','Thêm thành công việc mới'],['update','Cập nhật một công việc đã có']].forEach(([value,label])=>{
+      const option=document.createElement('option');option.value=value;option.textContent=label;actionSelect.append(option);
+    });
+    actionSelect.value=action;actionSelect.setAttribute('aria-label','Cách xử lý dòng '+(i+1));
+    const target=document.createElement('select');target.className='target-select';
+    const opt=document.createElement('option');opt.value='';opt.textContent='Chọn công việc đang theo dõi để cập nhật';target.append(opt);
+    for(const existing of active){
+      const o=document.createElement('option');o.value=existing.id;
+      o.textContent=existing.title+' · '+vnDate(existing.dueDate);target.append(o);
+    }
+    if(matched)target.value=matched.id;
+    function refreshAction(){target.classList.toggle('hide',actionSelect.value!=='update');}
+    actionSelect.addEventListener('change',refreshAction);refreshAction();
+    content.append(info,title,due,actionSelect,target);row.append(content);list.append(row);
   }
-  $('importInfo').textContent='Đã đọc '+clean.length+' nhiệm vụ. Có '+fresh.length+' công việc mới. Các công việc đã nhập trước đó được giữ nguyên. Hãy kiểm tra trước khi đồng bộ.';
+  $('importInfo').textContent='Đã đọc '+clean.length+' nhiệm vụ trên trang iCPV đang mở. '+initialAdd+
+    ' mục đề xuất thêm; '+checkCount+' mục cần rà soát. Bạn tự quyết định cập nhật, thêm mới hoặc bỏ qua. Các công việc cũ không tự thay đổi.';
   $('importDialog').showModal();
 }
 async function confirmImport(){
   if(!pendingImport||state.busy)return;
   if(!$('importAccountConfirm').checked){notify('Vui lòng xác nhận tài khoản và quyền sử dụng dữ liệu.',true);return;}
-  const items=[];
+  const decisions=[];
   for(const row of $('importPreview').querySelectorAll('.import-row')){
-    const check=row.querySelector('input[type=checkbox]');if(!check.checked)continue;
-    const original=pendingImport[Number(check.dataset.index)];
+    const kind=row.querySelector('.action-select').value;
+    if(kind==='ignore')continue;
+    const original=pendingImport[Number(row.dataset.index)];
     const title=row.querySelector('input[type=text]').value.trim();
-    if(!title){notify('Tên công việc không được để trống.',true);return;}
-    items.push({...original,title});
+    const dueDate=row.querySelector('input[type=date]').value;
+    if(!title||!dueDate){notify('Hãy kiểm tra tên và ngày đến hạn của công việc được chọn.',true);return;}
+    const targetId=row.querySelector('.target-select').value;
+    if(kind==='update'&&!targetId){notify('Hãy chọn công việc đang theo dõi để cập nhật.',true);return;}
+    decisions.push({sourceKey:original.sourceKey,title,dueDate,kind,targetId:kind==='update'?targetId:''});
   }
-  if(!items.length){notify('Bạn chưa chọn nhiệm vụ nào.',true);return;}
-  if(items.length>30){notify('Tối đa 30 nhiệm vụ mỗi lần.',true);return;}
+  if(!decisions.length){$('importDialog').close();pendingImport=null;notify('Đã giữ nguyên công việc hiện có.');return;}
   const button=$('importApply');button.disabled=true;
-  const old=button.textContent;button.textContent='Đang đối chiếu…';setBusy(true);
+  const old=button.textContent;button.textContent='Đang cập nhật…';setBusy(true);
   let checkAfterFailure=false;
   try{
-    const r=await api('importTasks',{items,expectedRevision:state.revision});
+    const r=await api('reviewIcpv',{decisions,expectedRevision:state.revision});
     updateData(r);
     if(r.change)emitTabChange({revision:r.revision,change:r.change});
     if(r.needsSync)kickOneSignalSync();
-    const summary=r.importSummary||{};
     $('importDialog').close();pendingImport=null;
-    const notes=Array.isArray(summary.notes)?summary.notes:[];
-    notify(r.notice||'Đã đồng bộ.');
-    if(notes.length)window.alert('Các dòng chưa được nhập:\n'+notes.slice(0,20).join('\n'));
-    showPane('list',true);
+    notify(r.notice||'Đã xử lý các công việc được chọn.');showPane('list',true);
   }catch(err){notify(err.message,true);checkAfterFailure=true;}
   finally{setBusy(false);button.disabled=false;button.textContent=old;flushChanges();
     if(checkAfterFailure)void checkRevision(true);}
 }
+
 start();

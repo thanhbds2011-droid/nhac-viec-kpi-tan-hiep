@@ -1,8 +1,8 @@
 {
   "name": "nhac-viec-kpi-tan-hiep",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "private": true,
-  "description": "Ứng dụng nhắc việc KPI tối giản, Google Login + Apps Script + OneSignal + Vercel",
+  "description": "Nhắc việc KPI Tân Hiệp: nhận nhắc hạn, thông báo Trưởng phòng, rà soát thay đổi iCPV có xác nhận",
   "type": "commonjs",
   "engines": {
     "node": ">=20"
@@ -10,7 +10,7 @@
   "scripts": {
     "start": "vercel dev",
     "test": "node --test tests/*.test.js",
-    "check": "node --check api/data.js && node --check api/realtime.js && node --check api/config.js && node --check server/realtime.js && node --check server/session.js && node --check server/identity.js && node --check public/app.js && cp apps-script/Code.gs /tmp/nhac-viec-gs-check.js && node --check /tmp/nhac-viec-gs-check.js && node --check chrome-extension/extract.js && node --check chrome-extension/bridge.js && node --check chrome-extension/popup.js && node --check chrome-extension/background.js"
+    "check": "node --check api/data.js && node --check api/realtime.js && node --check api/config.js && node --check server/realtime.js && node --check server/session.js && node --check server/identity.js && node --check public/app.js && cp apps-script/Code.gs /tmp/nhac-viec-gs-check.js && node --check /tmp/nhac-viec-gs-check.js && node --check chrome-extension/extract.js && node --check chrome-extension/bridge.js && node --check chrome-extension/popup.js && node --check chrome-extension/background.js && node --check chrome-extension/icpv-reader.js && node --check chrome-extension/auto-watch.js"
   },
   "dependencies": {
     "google-auth-library": "^9.15.1"

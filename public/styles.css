@@ -209,3 +209,6 @@ footer{font-size:10px;color:#8499a3;text-align:center;padding:15px 14px 24px}dia
   #appView[data-pane="admin"] #createPane, #appView[data-pane="admin"] #listPane{display:none}
   #adminPane{display:none}
 }
+
+/* v1.7: per-row user choice, no automatic merging of identical names. */
+.import-row>div{width:100%}.import-row input[type=date],.import-row select{min-width:0;width:100%;padding:8px;font-size:12px;border:1px solid #c9d7e9;border-radius:8px;background:#fff;color:#153b71}.import-row small{line-height:1.4}.import-row .target-select.hide{display:none}
