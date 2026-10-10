@@ -1,8 +1,8 @@
 {
   "name": "nhac-viec-kpi-tan-hiep",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "private": true,
-  "description": "Nhắc việc KPI Tân Hiệp: nhận nhắc hạn, thông báo Trưởng phòng, rà soát thay đổi iCPV có xác nhận",
+  "description": "Nhắc việc KPI Tân Hiệp: phân quyền quản trị độc lập, giao diện gọn, nhắc chấm điểm hằng ngày có cấu hình",
   "type": "commonjs",
   "engines": {
     "node": ">=20"

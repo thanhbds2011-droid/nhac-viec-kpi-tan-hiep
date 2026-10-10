@@ -15,6 +15,8 @@ class Sheet{
     const self=this;
     return {
       getValue(){return self.values[row-1]?.[col-1]??'';},
+      getDisplayValue(){return String(self.values[row-1]?.[col-1]??'');},
+      setValue(value){self.values[row-1]??=[];self.values[row-1][col-1]=value;return this;},
       getDisplayValues(){return Array.from({length:height},(_,i)=>Array.from({length:width},(_,j)=>String(self.values[row+i-1]?.[col+j-1]??'')));},
       getValues(){return Array.from({length:height},(_,i)=>Array.from({length:width},(_,j)=>self.values[row+i-1]?.[col+j-1]??''));},
       setValues(values){values.forEach((cells,i)=>{const r=row+i-1;self.values[r]??=[];cells.forEach((v,j)=>{self.values[r][col+j-1]=v;});});return this;},
@@ -208,4 +210,45 @@ test('V1.6: Người quản lý sai vai trò thì nhân viên vẫn xóa đượ
   const result=h.action('a@example.com','remove',{id:x.view.tasks[0].id,mode:'completed'});
   assert.match(result.view.notice,/Chưa có Trưởng phòng/);
   assert.equal(h.getState('a@example.com').completionOutbox.length,0);
+});
+
+
+test('v1.8: thêm cột G không sửa A:F, không sửa State, giữ quyền quản trị legacy',()=>{
+  const {context:c,map,state}=setup();
+  const sh=map.get('Tài khoản');
+  const before=sh.values.map(r=>Array.from({length:6},(_,i)=>r[i]??''));const savedState=JSON.stringify(state.values);
+  const result=c.prepareAdminPermissionColumn();
+  assert.match(result,/Quyền quản trị/);
+  assert.equal(sh.values[0][6],'Quyền quản trị');
+  assert.equal(sh.values[1][6],'Không');
+  assert.equal(sh.values[6][6],'Có');
+  assert.deepEqual(sh.values.map(r=>Array.from({length:6},(_,i)=>r[i]??'')),before);
+  assert.equal(JSON.stringify(state.values),savedState);
+  const after=JSON.stringify(sh.values);c.prepareAdminPermissionColumn();
+  assert.equal(JSON.stringify(sh.values),after);
+});
+test('v1.8: nhân viên kiêm quản trị, phó kiêm quản trị, trưởng kiêm quản trị được nhận diện độc lập',()=>{
+  const {context:c,map}=setup();
+  c.prepareAdminPermissionColumn();
+  const sh=map.get('Tài khoản');
+  sh.values[1][6]='Có';sh.values[3][6]='Có';sh.values[2][6]='Có';
+  const actor=email=>({email,name:email});
+  const a=c.checkAccess_(c.book_(),actor('a@example.com'));
+  const manager=c.checkAccess_(c.book_(),actor('b@example.com'));
+  const vice=c.checkAccess_(c.book_(),actor('p@example.com'));
+  assert.equal(a.role,'Nhân viên');assert.equal(a.isAdmin,true);
+  assert.equal(a.managerEmail,'b@example.com');
+  assert.equal(manager.isAdmin,true);assert.equal(c.roleKind_(manager.role),'MANAGER');
+  assert.equal(vice.isAdmin,true);assert.equal(c.roleKind_(vice.role),'VICE');
+  assert.equal(c.isManagerRole_(vice.role),false);
+  sh.values[1][6]='Không';
+  assert.equal(c.checkAccess_(c.book_(),actor('a@example.com')).isAdmin,false);
+  sh.values[6][6]='Không';
+  assert.equal(c.checkAccess_(c.book_(),actor('root@example.com')).isAdmin,false);
+});
+test('v1.8: G sai không cấp quyền quản trị và kiểm tra cấu hình báo lỗi',()=>{
+  const {context:c,map}=setup();c.prepareAdminPermissionColumn();
+  const user=map.get('Tài khoản').values[1];user[6]='Cóooo';
+  assert.equal(c.checkAccess_(c.book_(),{email:'a@example.com'}).isAdmin,false);
+  assert.match(c.validateVietnameseAdminSheets().errors.join(' '),/quyền quản trị/);
 });

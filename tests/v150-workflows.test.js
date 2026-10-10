@@ -33,7 +33,7 @@ function setup(){
   context.book_=()=>({});context.stateSheet_=()=>sheet;context.accessRows_=()=>acc;
   context.checkAccess_=(_ss,actor)=>{
     const row=acc.find(r=>r[0]===actor.email);if(!row||row[2]!=='YES')throw Error('Forbidden');
-    return {email:row[0],name:row[1],role:row[3],managerEmail:row[4]};
+    return {email:row[0],name:row[1],role:row[3],managerEmail:row[4],isAdmin:row[5]===true||row[3]==='ADMIN'};
   };
   context.Utilities={getUuid:()=>crypto.randomUUID(),formatDate:()=> '2026-10-09'};
   // Stub state reader to focus on integration with manager State storage and inbox.
@@ -146,4 +146,29 @@ test('Giao diện cũ không tạo thông báo hoàn thành khi API remove chưa
   const x=h.call('a@example.com','save',{title:'Việc cũ',dueDate:'2027-05-01',time:'07:30'});
   h.call('a@example.com','remove',{id:x.view.tasks[0].id});
   assert.equal(h.state('b@example.com').inbox.length,0);
+});
+
+
+test('v1.8: nhân viên kiêm quản trị vẫn thông báo Trưởng phòng khi hoàn thành, xem được tổng quan',()=>{
+  const h=setup();h.acc[0][5]=true;
+  h.call('b@example.com','load');
+  const a=h.call('a@example.com','load');
+  assert.equal(a.view.isAdmin,true);
+  assert.equal(a.view.managerConfigured,true);
+  const stats=h.call('a@example.com','adminStats').view.adminStats;
+  assert.equal(stats.accounts,6);
+  const job=h.call('a@example.com','save',{title:'Đầu việc kiêm quản trị',dueDate:'2027-05-01',time:'07:30'});
+  h.call('a@example.com','remove',{id:job.view.tasks[0].id,mode:'completed'});
+  assert.equal(h.state('b@example.com').inbox.length,1);
+  assert.equal(h.state('b@example.com').inbox[0].title,'Đầu việc kiêm quản trị');
+});
+test('v1.8: Trưởng phòng kiêm quản trị nhận thông báo từ nhân viên nhưng không gửi lên cấp trên khi xóa việc cá nhân',()=>{
+  const h=setup();h.acc[1][5]=true;
+  const before=h.call('b@example.com','load');assert.equal(before.view.isAdmin,true);
+  const a=h.call('a@example.com','save',{title:'Nhân viên hoàn thành',dueDate:'2027-05-01',time:'07:30'});
+  h.call('a@example.com','remove',{id:a.view.tasks[0].id,mode:'completed'});
+  assert.equal(h.state('b@example.com').inbox.length,1);
+  const b=h.call('b@example.com','save',{title:'Việc riêng Trưởng phòng',dueDate:'2027-05-01',time:'07:30'});
+  h.call('b@example.com','remove',{id:b.view.tasks[0].id,mode:'completed'});
+  assert.equal(h.state('b@example.com').inbox.length,1);
 });

@@ -13,10 +13,10 @@
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
-  <link rel="stylesheet" href="/styles.css?v=1.6.0" />
+  <link rel="stylesheet" href="/styles.css?v=1.8.0" />
   <script defer src="https://accounts.google.com/gsi/client"></script>
   <script defer src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js"></script>
-  <script defer src="/app.js?v=1.6.0"></script>
+  <script defer src="/app.js?v=1.8.0"></script>
 </head>
 <body>
 <div class="shell">
@@ -102,15 +102,6 @@
           <div class="panel-header"><h2>Thông báo</h2></div>
           <div class="inbox-wrap"><h3>Nhân viên đã hoàn thành <span id="inboxCount">0</span></h3>
             <div id="managerInbox" class="inbox-list">Không có thông báo cần xử lý.</div></div>
-          <div class="inform-card"><span class="inform-icon" aria-hidden="true">🔔</span>
-            <strong>Thông báo nhắc việc trên thiết bị</strong>
-            <p>Thông báo nhắc hạn được gửi tự động theo lịch. Thông báo hoàn thành của nhân viên được lưu bên trên cho đến khi bạn xóa.</p>
-            <p id="notificationSummary" class="inline-info"></p>
-            <button type="button" id="enablePushAlt" class="primary">Kiểm tra / bật thông báo</button>
-            <p class="push-help">Mỗi thiết bị và trình duyệt phải cấp quyền riêng. Chrome/Edge: mở website HTTPS và bấm Bật thông báo. iPhone: cài ứng dụng ra Màn hình chính (iOS 16.4+) rồi mở từ biểu tượng đó.</p>
-            <details class="push-debug"><summary>Kiểm tra trạng thái thiết bị</summary><p id="pushDiagnostics" role="status">Đang kiểm tra…</p>
-            <p>Thông báo đã bật không đồng nghĩa lịch gửi chắc chắn thành công. Nếu chưa nhận được thông báo, vui lòng liên hệ người hỗ trợ kỹ thuật để kiểm tra.</p></details>
-          </div>
         </section>
         <section class="panel detail-panel mobile-pane" id="profilePane" aria-label="Cá nhân">
           <div class="panel-header"><h2>Cá nhân</h2></div>
@@ -118,8 +109,7 @@
             <div><strong id="profileName">Viên chức</strong><p id="profileEmail"></p></div></div>
           <button type="button" class="menu-row" id="profileDefaultTime">⚙️ <span>Thay đổi giờ mặc định</span><span>›</span></button>
           <button type="button" id="adminShortcut" class="menu-row hide">📊 <span>Tổng quan quản trị</span><span>›</span></button>
-          <button type="button" class="menu-row" id="profilePush">🔔 <span>Trạng thái thông báo</span><span>›</span></button>
-          <p class="profile-version">Phiên bản 1.6.0 · Nhắc việc KPI – Tân Hiệp</p>
+          <p class="profile-version">Phiên bản 1.8.0 · Nhắc việc KPI – Tân Hiệp</p>
           <button type="button" class="profile-signout" id="profileSignout">Đăng xuất</button>
           <p class="install-help" id="installHelp">iPhone: Trong Safari, chọn Chia sẻ → Thêm vào Màn hình chính. Android: chọn Cài đặt ứng dụng / Thêm vào Màn hình chính.</p>
         </section>

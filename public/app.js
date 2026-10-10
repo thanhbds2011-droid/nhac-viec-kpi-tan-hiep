@@ -180,7 +180,6 @@ function resetForm(){
 function paintData(){
   $('defaultTime').value=state.defaultTime;$('defaultTimeLabel').textContent=state.defaultTime;
   renderTasks();renderSchedule();renderInbox();
-  $('notificationSummary').textContent=`Đang theo dõi ${state.tasks.filter(t=>dayDiff(t.dueDate)>=0).length} công việc chưa quá hạn.`;
 }
 function updateData(data){
   if(Number.isSafeInteger(data.revision)&&data.revision<state.revision)return false;
@@ -420,14 +419,9 @@ function pushState(){
   $('pushStatus').textContent=snap.ready?'Thông báo đã bật trên thiết bị này':issue?'Chưa thể nhận thông báo':
     state.pushError?'Thông báo cần kiểm tra':'Chưa bật thông báo trên thiết bị này';
   $('pushDetail').textContent=detail;
-  $('enablePush').textContent=snap.ready?'Kiểm tra lại':'Bật thông báo';
-  const diagnostics=$('pushDiagnostics');
-  if(diagnostics){
-    const mark=value=>value?'Có':'Chưa';
-    diagnostics.textContent='Quyền trình duyệt: '+snap.browserPermission+' · OneSignal: '+mark(snap.sdk)+
-      ' · Đúng tài khoản: '+mark(snap.account)+' · Subscription: '+mark(snap.subscription)+
-      ' · Đăng ký nhận tin: '+mark(snap.optedIn)+(state.pushError?' · Lỗi: '+state.pushError:'');
-  }
+  $('enablePush').textContent='Bật thông báo';
+  $('enablePush').closest('.notification-bar').classList.toggle('hide',snap.ready);
+
 }
 let sdkInitPromise=null;
 function sdk(){
@@ -515,7 +509,7 @@ async function enablePush(){
     if(!o.Notifications.permission&&Notification.permission==='default')permissionRequest=o.Notifications.requestPermission();
   }catch(err){state.pushError=String(err?.message||err);pushState();notify(state.pushError,true);return;}
   state.pushBusy=true;
-  $('enablePush').disabled=true;$('enablePushAlt').disabled=true;
+  $('enablePush').disabled=true;
   $('enablePush').textContent='Đang kiểm tra…';
   const epoch=state.sessionEpoch,externalId=state.user.externalId;
   try{
@@ -536,7 +530,7 @@ async function enablePush(){
     if(epoch===state.sessionEpoch){state.pushError=String(err?.message||err);pushState();}
     notify(String(err?.message||err),true);
   }finally{
-    state.pushBusy=false;$('enablePush').disabled=false;$('enablePushAlt').disabled=false;pushState();
+    state.pushBusy=false;$('enablePush').disabled=false;pushState();
   }
 }
 async function signedIn(response){
@@ -600,10 +594,8 @@ async function start(){
   $('reloadBtn').addEventListener('click',refresh);
   $('saveDefaultTime').addEventListener('click',saveDefaultTime);
   $('enablePush').addEventListener('click',enablePush);
-  $('enablePushAlt').addEventListener('click',enablePush);
   $('signoutBtn').addEventListener('click',signout);$('profileSignout').addEventListener('click',signout);
   $('profileDefaultTime').addEventListener('click',openDefaultSettings);
-  $('profilePush').addEventListener('click',()=>showPane('notifications',true));
   $('desktopJobsBtn').addEventListener('click',()=>showPane('list'));
   $('desktopNoticeBtn').addEventListener('click',()=>{showPane('notifications');void refresh();});
   $('desktopAdminBtn').addEventListener('click',()=>{if(state.isAdmin)showPane('admin');});

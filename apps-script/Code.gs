@@ -1,5 +1,5 @@
 /**
- * NHẮC VIỆC KPI – TÂN HIỆP | production v1.6.0
+ * NHẮC VIỆC KPI – TÂN HIỆP | production v1.8.0
  * Google Sheets Access/State unchanged. Single OneSignal application.
  * Never call OneSignal while holding the shared script lock.
  * Durable claim + idempotency key protects concurrent edits and uncertain responses.
@@ -58,12 +58,12 @@ function prepareVietnameseAdminSheets(){
     throw new Error('Đã có tab chuẩn bị. Không ghi đè; hãy kiểm tra và tiếp tục cấu hình hiện có.');
   var users=ss.insertSheet(SHEET_USERS),dept=ss.insertSheet(SHEET_DEPARTMENTS);
   var count=Math.max(0,legacy.getLastRow()-1),old=count?legacy.getRange(2,1,count,5).getDisplayValues():[];
-  users.getRange(1,1,1,6).setValues([['Email đăng nhập','Họ và tên','Trạng thái','Vai trò','Mã Phòng/Khu','Email quản lý cũ (đối chiếu)']]);
+  users.getRange(1,1,1,7).setValues([['Email đăng nhập','Họ và tên','Trạng thái','Vai trò','Mã Phòng/Khu','Email quản lý cũ (đối chiếu)','Quyền quản trị']]);
   if(old.length){
-    users.getRange(2,1,old.length,6).setValues(old.map(function(r){return [r[0],r[1],enabled_(r[2])?'Hoạt động':'Ngừng hoạt động',roleLabel_(r[3]),'',r[4]||''];}));
+    users.getRange(2,1,old.length,7).setValues(old.map(function(r){return [r[0],r[1],enabled_(r[2])?'Hoạt động':'Ngừng hoạt động',roleLabel_(r[3]),'',r[4]||'',isAdmin_(r[3])?'Có':'Không'];}));
   }
   dept.getRange(1,1,1,5).setValues([['Mã Phòng/Khu','Tên Phòng/Khu','Email Trưởng phòng/Khu','Email Phó thứ nhất (tùy chọn)','Email Phó thứ hai (tùy chọn)']]);
-  configureAdminView_(users,[270,220,160,190,160,280]);
+  configureAdminView_(users,[270,220,160,190,160,280,150]);
   configureAdminView_(dept,[140,250,290,260,260]);
   users.getRange(2,3,users.getMaxRows()-1,1).setDataValidation(SpreadsheetApp.newDataValidation()
     .requireValueInList(['Hoạt động','Ngừng hoạt động'],true).setAllowInvalid(false).build());
@@ -73,12 +73,48 @@ function prepareVietnameseAdminSheets(){
     .requireValueInRange(dept.getRange(2,1,dept.getMaxRows()-1,1),true).setAllowInvalid(false).build());
   users.getRange(1,5).setNote('Nhập đúng mã đã khai báo tại tab Quản lý Phòng-Khu. Không nhập email Trưởng phòng vào đây.');
   users.getRange(1,6).setNote('Giữ lại email quản lý từ cột E của Access cũ để đối chiếu. Không dùng cột này để gửi thông báo.');
+  users.getRange(1,7).setNote('Có: xem số liệu tổng quan; Không: chỉ sử dụng quyền nghiệp vụ của vai trò tại cột D.');
+  users.getRange(2,7,users.getMaxRows()-1,1).setDataValidation(SpreadsheetApp.newDataValidation()
+    .requireValueInList(['Có','Không'],true).setAllowInvalid(false).build());
   if(users.hideColumns)users.hideColumns(6);
   dept.getRange(1,3).setNote('Một email Trưởng phòng/Khu có thể quản lý tất cả tài khoản cùng mã Phòng/Khu. Email phải có trong tab Tài khoản và có đúng vai trò Trưởng phòng/Khu.');
   // Không sửa tab State, không tự chuyển chế độ, Access cũ vẫn đang cấp quyền khi chuẩn bị.
   SpreadsheetApp.flush();
   return 'Đã tạo tab Tài khoản và Quản lý Phòng-Khu. Access và State còn nguyên. Hãy điền mã đơn vị và kiểm tra trước khi kích hoạt.';
 }
+/**
+ * Chỉ thêm cột G (quyền quản trị) vào tab tiếng Việt hiện có.
+ * Giữ nguyên A:F, các tài khoản, Phòng/Khu và toàn bộ State.
+ * Chạy duy nhất một lần sau khi deploy; gọi lại an toàn.
+ */
+function prepareAdminPermissionColumn(){
+  var ss=book_(),users=ss.getSheetByName(SHEET_USERS);
+  if(!users)throw new Error('Chưa có tab Tài khoản. Không tự tạo dữ liệu.');
+  var header=String(users.getRange(1,7).getDisplayValue?users.getRange(1,7).getDisplayValue():users.getRange(1,7).getValue()||'').trim();
+  if(header&&header!=='Quyền quản trị')throw new Error('Cột G đang có nội dung khác. Không được ghi đè.');
+  var last=users.getLastRow(),values=last>1?users.getRange(2,1,last-1,7).getDisplayValues():[];
+  values.forEach(function(r,i){
+    var email=String(r[0]||'').trim();if(!email||String(r[6]||'').trim())return;
+    users.getRange(i+2,7).setValue(isAdmin_(r[3])?'Có':'Không');
+  });
+  users.getRange(1,7).setValue('Quyền quản trị');
+  users.getRange(1,7).setBackground('#1e3a5f').setFontColor('#ffffff').setFontWeight('bold');
+  users.setColumnWidth(7,155);
+  users.getRange(1,7).setNote('Có: thêm quyền xem tổng quan; Không: chỉ thực hiện nghiệp vụ theo vai trò ở cột D.');
+  users.getRange(2,7,users.getMaxRows()-1,1).setDataValidation(SpreadsheetApp.newDataValidation()
+    .requireValueInList(['Có','Không'],true).setAllowInvalid(false).build());
+  SpreadsheetApp.flush();
+  return 'Đã chuẩn bị cột G – Quyền quản trị. Các cột A:F và State không thay đổi.';
+}
+function adminPermission_(flag,role){
+  var key=textKey_(flag);
+  if(['CO','YES','TRUE','1'].indexOf(key)!==-1)return true;
+  if(['KHONG','NO','FALSE','0'].indexOf(key)!==-1)return false;
+  if(key)return false; // Dữ liệu không hợp lệ không được cấp quyền.
+  // Tương thích tài khoản Quản trị viên cũ cho đến khi được cấp cờ riêng.
+  return isAdmin_(role);
+}
+function accountIsAdmin_(info){return typeof info.isAdmin==='boolean'?info.isAdmin:isAdmin_(info.role);}
 function roleLabel_(role){
   var kind=roleKind_(role);
   return kind==='MANAGER'?'Trưởng phòng/Khu':kind==='VICE'?'Phó Trưởng phòng/Khu':kind==='ADMIN'?'Quản trị viên':kind==='EMPLOYEE'?'Nhân viên':String(role||'');
@@ -86,7 +122,7 @@ function roleLabel_(role){
 function validateVietnameseAdminSheets(){
   var ss=book_(),u=ss.getSheetByName(SHEET_USERS),d=ss.getSheetByName(SHEET_DEPARTMENTS),problems=[];
   if(!u||!d)return {ok:false,errors:['Thiếu tab Tài khoản hoặc Quản lý Phòng-Khu. Chạy hàm chuẩn bị trước.']};
-  var users=u.getLastRow()>1?u.getRange(2,1,u.getLastRow()-1,5).getDisplayValues():[];
+  var users=u.getLastRow()>1?u.getRange(2,1,u.getLastRow()-1,7).getDisplayValues():[];
   var units=d.getLastRow()>1?d.getRange(2,1,d.getLastRow()-1,5).getDisplayValues():[];
   var emailPattern=/^[^\s@]+@[^\s@]+\.[^\s@]+$/,byEmail={},byUnit={};
   users.forEach(function(r,i){
@@ -96,6 +132,8 @@ function validateVietnameseAdminSheets(){
     if(byEmail[email])problems.push('Tài khoản dòng '+(i+2)+': email bị trùng.');
     byEmail[email]={email:email,role:kind,active:enabled_(r[2]),unit:String(r[4]||'').trim()};
     if(!kind)problems.push('Tài khoản dòng '+(i+2)+': vai trò chưa hợp lệ.');
+    if(String(r[6]||'').trim()&&!['CO','KHONG'].includes(textKey_(r[6])))
+      problems.push('Tài khoản dòng '+(i+2)+': quyền quản trị chỉ nhận Có hoặc Không.');
     if(['HOAT DONG','NGUNG HOAT DONG'].indexOf(textKey_(r[2]))===-1)
       problems.push('Tài khoản dòng '+(i+2)+': trạng thái phải là Hoạt động hoặc Ngừng hoạt động.');
     if(enabled_(r[2])&&kind!=='ADMIN'&&!String(r[4]||'').trim())
@@ -164,7 +202,8 @@ function onOpen(){
     .addItem('1. Chuẩn bị bảng tiếng Việt','prepareVietnameseAdminSheets')
     .addItem('2. Kiểm tra phân quyền','inspectVietnameseAdminSheets')
     .addItem('3. Kích hoạt phân quyền','activateVietnameseAdminSheets')
-    .addItem('4. Quay lại Access cũ','rollbackVietnameseAdminSheets').addToUi();}catch(_e){}
+    .addItem('4. Quay lại Access cũ','rollbackVietnameseAdminSheets')
+    .addItem('5. Bổ sung cột quyền quản trị','prepareAdminPermissionColumn').addToUi();}catch(_e){}
 }
 
 function jsonOutput_(o){return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON);}
@@ -218,7 +257,7 @@ function accessRows_(ss){
   if(!vietnamese)return sh.getRange(2,1,sh.getLastRow()-1,sh.getLastColumn()>=5?5:4).getDisplayValues();
   // Trả cùng định dạng Access v1.5.0: email, tên, hoạt động, vai trò, email quản lý, mã phòng.
   // Không sử dụng email do người dùng tự gửi lên; người nhận chỉ được tra từ cấu hình được kiểm tra.
-  var people=sh.getRange(2,1,sh.getLastRow()-1,5).getDisplayValues();
+  var people=sh.getRange(2,1,sh.getLastRow()-1,7).getDisplayValues();
   var byEmail={},duplicateEmail={};
   people.forEach(function(r){
     var e=String(r[0]||'').trim().toLowerCase();
@@ -237,7 +276,7 @@ function accessRows_(ss){
   });
   return people.map(function(r){
     var unit=String(r[4]||'').trim(),email=String(r[0]||'').trim().toLowerCase();
-    return [r[0],r[1],duplicateEmail[email]?'Ngừng hoạt động':r[2],r[3],ambiguous[unit]?'':(managers[unit]||''),unit];
+    return [r[0],r[1],duplicateEmail[email]?'Ngừng hoạt động':r[2],r[3],ambiguous[unit]?'':(managers[unit]||''),unit,r[6]||''];
   });
 }
 function checkAccess_(ss,actor){
@@ -246,7 +285,7 @@ function checkAccess_(ss,actor){
   for(var i=0;i<entries.length;i++){
     if(String(entries[i][0]).trim().toLowerCase()!==email)continue;
     if(!enabled_(entries[i][2]))throw fail_('FORBIDDEN','Tài khoản chưa được kích hoạt hoặc đã bị thu hồi quyền.');
-    return {email:email,name:String(entries[i][1]).trim()||String(actor.name||'').slice(0,80)||email,role:String(entries[i][3]||'').trim(),managerEmail:String(entries[i][4]||'').trim().toLowerCase(),unit:String(entries[i][5]||'').trim()};
+    return {email:email,name:String(entries[i][1]).trim()||String(actor.name||'').slice(0,80)||email,role:String(entries[i][3]||'').trim(),managerEmail:String(entries[i][4]||'').trim().toLowerCase(),unit:String(entries[i][5]||'').trim(),isAdmin:adminPermission_(entries[i][6],entries[i][3])};
   }
   throw fail_('FORBIDDEN','Tài khoản Google này chưa có trong danh sách Access.');
 }
@@ -293,7 +332,7 @@ function vnToday_(){return Utilities.formatDate(new Date(),VN_ZONE,'yyyy-MM-dd')
 function vnDay_(s){return s.slice(8,10)+'/'+s.slice(5,7)+'/'+s.slice(0,4);}
 function publicView_(profile,info,ext){
   var now=Date.now(),horizon=now+DAYS_AHEAD*DAY_MS;
-  return {email:info.email,name:info.name,externalId:ext,defaultTime:profile.defaultTime,revision:profile.revision,isAdmin:isAdmin_(info.role),managerConfigured:!!info.managerEmail&&!isManagerRole_(info.role),
+  return {email:info.email,name:info.name,externalId:ext,defaultTime:profile.defaultTime,revision:profile.revision,isAdmin:accountIsAdmin_(info),managerConfigured:!!info.managerEmail&&!isManagerRole_(info.role),
     deletedSourceKeys:profile.deletedSourceKeys,
     inbox:profile.inbox.filter(function(n){return !n.dismissed;}).map(function(n){return {id:n.id,from:n.from,title:n.title,at:n.at};}),
     tasks:profile.tasks.filter(function(t){return !t.deleted;}).map(function(t){
@@ -382,7 +421,7 @@ function runAction_(req){
   // Token refresh: verify Access without loading or creating a State row.
   if(action==='authorize')return {view:{authorized:true},sync:false,changed:false};
   if(action==='adminStats'){
-    if(!isAdmin_(info.role))throw fail_('FORBIDDEN','Bạn không có quyền xem tổng quan quản trị.');
+    if(!accountIsAdmin_(info))throw fail_('FORBIDDEN','Bạn không có quyền xem tổng quan quản trị.');
     return {view:{adminStats:adminStats_(ss)},sync:false,changed:false};
   }
   var item=readState_(ss,req.actor,action!=='status');
@@ -611,13 +650,40 @@ function createNotification_(slot,task,externalId){
 function cancelNotification_(id){
   return oneSignal_('delete','/notifications/'+encodeURIComponent(id)+'?app_id='+encodeURIComponent(prop_('ONESIGNAL_APP_ID')));
 }
-function createManagerNotification_(notice,externalId){
+function createManagerNotification_(notice,externalId,idempotencyKey,isReminder){
   return oneSignal_('post','/notifications',{
     app_id:prop_('ONESIGNAL_APP_ID'),target_channel:'push',include_aliases:{external_id:[externalId]},
-    headings:{en:'Nhân viên đã hoàn thành công việc'},
-    contents:{en:notice.from+' đã hoàn thành: '+notice.title.slice(0,65)+'. Vui lòng vào iCPV chấm điểm.'},
-    url:prop_('WEB_URL'),idempotency_key:notice.id
+    headings:{en:isReminder?'Nhắc chấm điểm công việc':'Nhân viên đã hoàn thành công việc'},
+    contents:{en:(isReminder?'Công việc chờ chấm điểm: ':'')+notice.from+' đã hoàn thành: '+notice.title.slice(0,60)+'. Vui lòng vào iCPV chấm điểm.'},
+    url:prop_('WEB_URL'),idempotency_key:idempotencyKey||notice.id
   });
+}
+/** Không tự đặt giờ mặc định: chỉ nhắc lại khi người quản trị đã xác nhận và đặt thuộc tính. */
+function managerReminderTime_(){var value=String(prop_('MANAGER_REMINDER_TIME')||'').trim();return validTime_(value)?value:'';}
+function managerAlertKind_(message,now){
+  if(message.dismissed||(message.leaseUntil&&message.leaseUntil>now))return '';
+  if(!message.pushSent)return !message.nextRetryAt||message.nextRetryAt<=now?'manager':'';
+  var time=managerReminderTime_();if(!time)return '';
+  var today=Utilities.formatDate(new Date(now),VN_ZONE,'yyyy-MM-dd');
+  var hhmm=Utilities.formatDate(new Date(now),VN_ZONE,'HH:mm');
+  var first=message.initialPushDay||(message.at?Utilities.formatDate(new Date(message.at),VN_ZONE,'yyyy-MM-dd'):today);
+  if(today<=first||hhmm<time||message.lastReminderDay===today)return '';
+  if(message.dailyAttemptDay===today&&message.nextRetryAt&&message.nextRetryAt>now)return '';
+  return 'managerReminder';
+}
+function reserveManagerJob_(message,kind,now,externalId){
+  message.leaseUntil=now+CLAIM_MS;
+  var day='';
+  if(kind==='managerReminder'){
+    day=Utilities.formatDate(new Date(now),VN_ZONE,'yyyy-MM-dd');
+    if(message.dailyAttemptDay!==day){
+      message.dailyAttemptDay=day;
+      message.dailyAttemptKey=Utilities.getUuid();
+      message.nextRetryAt=0;
+    }
+  }
+  return {key:message.id,kind:kind,slot:JSON.parse(JSON.stringify(message)),externalId:externalId,
+    idempotencyKey:kind==='managerReminder'?message.dailyAttemptKey:message.id,sendDay:day};
 }
 function findSlot_(p,key){
   for(var h=0;h<p.inbox.length;h++)if(p.inbox[h].id===key)return {slot:p.inbox[h],type:'manager',parent:null};
@@ -647,8 +713,9 @@ function claimJobs_(sh,row,email,maxCount,force){
   if(!hasCancellation){
     // Preserve the existing due-date scheduler: leave one slot for manager alerts.
     var dueBudget=maxCount;
-    var hasManagerPending=p.externalId&&p.inbox.some(function(m){return !m.dismissed&&!m.pushSent&&
-      (!m.leaseUntil||m.leaseUntil<=now)&&(!m.nextRetryAt||m.nextRetryAt<=now||force);});
+    var hasManagerPending=p.externalId&&p.inbox.some(function(m){
+      return !!managerAlertKind_(m,now);
+    });
     if(hasManagerPending)dueBudget=Math.max(0,maxCount-1);
     for(var j=0;j<p.tasks.length&&jobs.length<dueBudget;j++){
       var t=p.tasks[j];if(t.deleted)continue;
@@ -663,10 +730,9 @@ function claimJobs_(sh,row,email,maxCount,force){
     // Reserve at most one manager push in each shared batch; due-date jobs retain priority.
     for(var h=0;h<p.inbox.length&&jobs.length<maxCount;h++){
       var m=p.inbox[h];
-      if(m.dismissed||m.pushSent||!p.externalId||(m.leaseUntil&&m.leaseUntil>now)||
-        (m.nextRetryAt&&m.nextRetryAt>now&&!force))continue;
-      m.leaseUntil=now+CLAIM_MS;changed=true;
-      jobs.push({key:m.id,kind:'manager',slot:JSON.parse(JSON.stringify(m)),externalId:p.externalId});
+      if(!p.externalId)continue;
+      var kind=managerAlertKind_(m,now);if(!kind)continue;
+      changed=true;jobs.push(reserveManagerJob_(m,kind,now,p.externalId));
     }
   }
   if(changed)saveState_(sh,row,p,email);
@@ -686,10 +752,15 @@ function finishJobs_(sh,row,email,results){
       if(found.parent)found.parent.lastError='Chưa lên lịch được: '+String(r.error).slice(0,90);
       return;
     }
-      if(r.kind==='manager'){
-        if(found.type==='manager'){
-          if(r.id)s.pushSent=true;
-          else s.nextRetryAt=now+6*CLOCK_MS;
+      if(r.kind==='manager'||r.kind==='managerReminder'){
+        if(found.type==='manager'&&!s.dismissed){
+          if(r.kind==='manager'){
+            if(r.id){s.pushSent=true;s.initialPushDay=Utilities.formatDate(new Date(now),VN_ZONE,'yyyy-MM-dd');s.nextRetryAt=0;}
+            else s.nextRetryAt=now+6*CLOCK_MS;
+          }else if(s.dailyAttemptDay===r.sendDay){
+            if(r.id){s.lastReminderDay=r.sendDay;s.nextRetryAt=0;}
+            else s.nextRetryAt=now+2*CLOCK_MS;
+          }
         }
         return;
       }
@@ -712,9 +783,9 @@ function finishJobs_(sh,row,email,results){
 }
 function performJobs_(jobs){
   return jobs.map(function(j){
-    var result={key:j.key,leaseUntil:j.slot.leaseUntil,kind:j.kind,id:'',error:''};
+    var result={key:j.key,leaseUntil:j.slot.leaseUntil,kind:j.kind,sendDay:j.sendDay||'',id:'',error:''};
     try{
-      if(j.kind==='manager')result.id=String(createManagerNotification_(j.slot,j.externalId).id||'');
+      if(j.kind==='manager'||j.kind==='managerReminder')result.id=String(createManagerNotification_(j.slot,j.externalId,j.idempotencyKey,j.kind==='managerReminder').id||'');
       else if(j.kind==='cancel')cancelNotification_(j.slot.id);
       else {
         var response=createNotification_(j.slot,j.task,j.externalId);
@@ -747,10 +818,8 @@ function claimManagerAlerts_(sh,row,email,maxCount){
   var now=Date.now(),jobs=[],changed=false;
   for(var i=0;i<p.inbox.length&&jobs.length<maxCount;i++){
     var m=p.inbox[i];
-    if(m.dismissed||m.pushSent||(m.leaseUntil&&m.leaseUntil>now)||
-      (m.nextRetryAt&&m.nextRetryAt>now))continue;
-    m.leaseUntil=now+CLAIM_MS;changed=true;
-    jobs.push({key:m.id,kind:'manager',slot:JSON.parse(JSON.stringify(m)),externalId:p.externalId});
+    var kind=managerAlertKind_(m,now);if(!kind)continue;
+    changed=true;jobs.push(reserveManagerJob_(m,kind,now,p.externalId));
   }
   if(changed)saveState_(sh,row,p,email);
   return jobs;
@@ -818,8 +887,7 @@ function syncScheduledNotifications(){
     var needCreate=!snapshot.cancellations.length&&snapshot.tasks.some(function(t){return !t.deleted&&(t.slots||[]).some(function(s){
       return !s.id&&s.at>now+60000&&s.at<=horizon&&(!s.leaseUntil||s.leaseUntil<=now)&&(!s.nextRetryAt||s.nextRetryAt<=now);
     });});
-      var needManager=allowed[email]&&snapshot.inbox.some(function(m){return !m.dismissed&&!m.pushSent&&
-        (!m.leaseUntil||m.leaseUntil<=now)&&(!m.nextRetryAt||m.nextRetryAt<=now);});
+      var needManager=allowed[email]&&snapshot.inbox.some(function(m){return !!managerAlertKind_(m,now);});
       var needRevoke=!allowed[email]&&snapshot.tasks.some(function(t){return !t.deleted;});
     var needClean=!snapshot.cancellations.length&&snapshot.tasks.some(function(t){
       return t.deleted||dateMs_(t.dueDate,t.time,0)<=now-30*DAY_MS;
