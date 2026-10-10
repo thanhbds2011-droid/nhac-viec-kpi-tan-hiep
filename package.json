@@ -1,8 +1,8 @@
 {
   "name": "nhac-viec-kpi-tan-hiep",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "private": true,
-  "description": "Nhắc việc KPI Tân Hiệp: phân quyền quản trị độc lập, giao diện gọn, nhắc chấm điểm hằng ngày có cấu hình",
+  "description": "Nhắc việc KPI Tân Hiệp: giao diện Desktop, iOS, Android theo mẫu đã duyệt; giữ nguyên nghiệp vụ v1.8.0",
   "type": "commonjs",
   "engines": {
     "node": ">=20"

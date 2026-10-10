@@ -13,10 +13,10 @@
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
-  <link rel="stylesheet" href="/styles.css?v=1.8.0" />
+  <link rel="stylesheet" href="/styles.css?v=1.9.0" />
   <script defer src="https://accounts.google.com/gsi/client"></script>
   <script defer src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js"></script>
-  <script defer src="/app.js?v=1.8.0"></script>
+  <script defer src="/app.js?v=1.9.0"></script>
 </head>
 <body>
 <div class="shell">
@@ -25,7 +25,11 @@
       <span class="brand-icon" aria-hidden="true">🔔</span>
       <div class="brand-text"><h1>NHẮC VIỆC KPI</h1><p>TÂN HIỆP</p></div>
     </div>
-    <button id="signoutBtn" class="signout hide" type="button">Đăng xuất</button>
+    <div class="header-controls">
+      <button id="headerNoticeBtn" class="header-icon-button hide" type="button" aria-label="Xem thông báo" title="Thông báo"><span aria-hidden="true">🔔</span><i id="headerNoticeDot" class="header-alert-dot hide" aria-hidden="true"></i></button>
+      <button id="headerProfileBtn" class="header-profile hide" type="button" aria-label="Mở thông tin cá nhân" title="Cá nhân"><span id="headerUserAvatar" class="header-avatar" aria-hidden="true">NV</span><span class="header-user-label"><strong id="headerUserName">Người dùng</strong><small>Cá nhân ▾</small></span></button>
+      <button id="signoutBtn" class="signout hide" type="button">Đăng xuất</button>
+    </div>
   </header>
   <main id="mainContent">
     <div id="toast" class="toast hide" role="status" aria-live="polite"></div>
@@ -41,8 +45,8 @@
     </section>
     <div id="appView" class="hide" data-pane="list">
       <section class="overview" aria-label="Thông tin cá nhân">
-        <div class="welcome"><span class="welcome-title">Xin chào, <strong id="displayName">bạn</strong></span>
-          <span id="accountEmail" class="account-email"></span></div>
+        <div class="welcome"><span class="welcome-sun" aria-hidden="true">☀</span><div class="welcome-copy"><span class="welcome-title">Xin chào, <strong id="displayName">bạn</strong></span>
+          <span class="welcome-subtitle">Chúc bạn một ngày làm việc hiệu quả!</span><span id="accountEmail" class="account-email"></span></div></div>
         <div class="task-total"><strong id="taskCount">0</strong><span>việc theo dõi</span></div>
         <div class="desktop-tools"><button type="button" id="desktopJobsBtn" class="secondary small">Công việc</button>
           <button type="button" id="desktopNoticeBtn" class="secondary small">Thông báo</button>
@@ -57,8 +61,8 @@
       </section>
       <div class="workspace">
         <section class="panel form-panel mobile-pane" id="createPane" aria-label="Thêm hoặc sửa công việc">
-          <div class="panel-header"><button type="button" id="backToList" class="icon-back" aria-label="Quay về danh sách">‹</button>
-            <h2 id="formHeading">Thêm công việc</h2><button type="button" class="text-button hide" id="cancelEdit">Hủy sửa</button>
+          <div class="panel-header form-header"><button type="button" id="backToList" class="icon-back" aria-label="Quay về danh sách">‹</button>
+            <span class="form-symbol" aria-hidden="true">＋</span><div class="panel-heading"><h2 id="formHeading">Thêm công việc</h2><p class="panel-subtitle">Tạo công việc và nhận nhắc hạn tự động</p></div><button type="button" class="text-button hide" id="cancelEdit">Hủy sửa</button>
           </div>
           <form id="taskForm">
             <div class="field"><label for="taskTitle">Tên công việc <span class="req">*</span></label>
@@ -83,13 +87,13 @@
           </details>
         </section>
         <section class="panel list-panel mobile-pane is-mobile-active" id="listPane" aria-label="Danh sách công việc cá nhân">
-          <div class="panel-header list-header"><h2>Công việc của tôi</h2>
+          <div class="panel-header list-header"><div class="list-heading"><span class="list-symbol" aria-hidden="true">▤</span><div class="panel-heading"><h2>Công việc của tôi</h2><p class="panel-subtitle">Danh sách công việc bạn đang theo dõi</p></div></div>
             <span id="syncStatus" class="sync-status" role="status">Chỉ đọc dữ liệu khi cần</span>
             <button type="button" class="text-button" id="reloadBtn" title="Tải lại công việc từ máy chủ">↻ Làm mới</button></div>
           <div class="filters" aria-label="Lọc công việc">
             <button type="button" class="filter is-active" data-filter="all" aria-pressed="true">Tất cả <span id="mobileCount">0</span></button>
-            <button type="button" class="filter" data-filter="soon" aria-pressed="false">Sắp đến hạn</button>
-            <button type="button" class="filter" data-filter="past" aria-pressed="false">Đã quá hạn</button>
+            <button type="button" class="filter" data-filter="soon" aria-pressed="false">Sắp đến hạn <span id="soonCount" class="filter-count">0</span></button>
+            <button type="button" class="filter" data-filter="past" aria-pressed="false">Đã quá hạn <span id="pastCount" class="filter-count">0</span></button>
           </div>
           <div class="tasks" id="taskList" aria-live="polite"><div class="empty">Bạn chưa có công việc nào.</div></div>
         </section>
@@ -109,7 +113,7 @@
             <div><strong id="profileName">Viên chức</strong><p id="profileEmail"></p></div></div>
           <button type="button" class="menu-row" id="profileDefaultTime">⚙️ <span>Thay đổi giờ mặc định</span><span>›</span></button>
           <button type="button" id="adminShortcut" class="menu-row hide">📊 <span>Tổng quan quản trị</span><span>›</span></button>
-          <p class="profile-version">Phiên bản 1.8.0 · Nhắc việc KPI – Tân Hiệp</p>
+          <p class="profile-version">Phiên bản 1.9.0 · Nhắc việc KPI – Tân Hiệp</p>
           <button type="button" class="profile-signout" id="profileSignout">Đăng xuất</button>
           <p class="install-help" id="installHelp">iPhone: Trong Safari, chọn Chia sẻ → Thêm vào Màn hình chính. Android: chọn Cài đặt ứng dụng / Thêm vào Màn hình chính.</p>
         </section>
@@ -118,6 +122,10 @@
           <div class="admin-cards"><div><strong id="adminAccounts">—</strong><span>Tổng tài khoản</span></div>
             <div><strong id="adminTasks">—</strong><span>Đầu việc đã đăng ký</span></div></div>
           <p id="adminNote" class="section-help"></p>
+        </section>
+        <section id="adminQuickPanel" class="panel admin-quick hide" aria-label="Lối tắt tổng quan quản trị">
+          <div class="admin-quick-head"><span class="admin-quick-icon" aria-hidden="true">▥</span><div><h2>Tổng quan ứng dụng</h2><p class="panel-subtitle">Thống kê tài khoản và công việc đang quản lý</p></div></div>
+          <button id="adminQuickOpen" type="button" class="secondary small">Xem số liệu →</button>
         </section>
       </div>
       <button type="button" id="tabCreate" class="fab" aria-label="Thêm công việc" title="Thêm công việc">+</button>

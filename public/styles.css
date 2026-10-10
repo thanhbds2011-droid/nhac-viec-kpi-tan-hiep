@@ -203,3 +203,192 @@ footer{font-size:10px;color:#8499a3;text-align:center;padding:15px 14px 24px}dia
 
 /* v1.7: per-row user choice, no automatic merging of identical names. */
 .import-row>div{width:100%}.import-row input[type=date],.import-row select{min-width:0;width:100%;padding:8px;font-size:12px;border:1px solid #c9d7e9;border-radius:8px;background:#fff;color:#153b71}.import-row small{line-height:1.4}.import-row .target-select.hide{display:none}
+
+/* ======================================================
+ * v1.9.0 – VISUAL BASELINE (Desktop / iOS / Android)
+ * UI only: no scheduling, authentication or API semantics.
+ * ====================================================== */
+:root{font-family:'Be Vietnam Pro',system-ui,-apple-system,Arial,sans-serif;color:#17345b;background:#f2f6fe;--ui-blue:#0d5ee5;--ui-dark:#103d86;--ui-line:#dfe8f5;--ui-muted:#667e9f;--ui-surface:#fff;--ui-shadow:0 9px 34px rgba(35,85,157,.065)}
+body{background:linear-gradient(180deg,#edf4ff 0,#f4f7ff 320px,#f2f6fe 100%);color:#17345b}
+button,input{font-family:inherit}
+button:focus-visible,input:focus-visible,summary:focus-visible{outline:3px solid #6daaff;outline-offset:2px}
+button{transition:background .16s ease,box-shadow .16s ease,transform .16s ease}
+.primary{background:var(--ui-blue);color:#fff;box-shadow:0 3px 8px rgba(13,94,229,.12)}.primary:hover{background:#084fc5}
+.secondary{background:#eaf2ff;color:#1355b8}.secondary:hover{background:#dceaff}
+.text-button{color:#115fd5}.text-button:hover{background:#edf5ff}
+.topbar{min-height:86px;padding:14px max(24px,calc((100vw - 1320px)/2));background:linear-gradient(105deg,#0a4fb6,#1565d7 55%,#0649af);color:white;border:0;box-shadow:0 2px 12px rgba(3,50,119,.11)}
+.brand-icon{width:50px;flex-basis:50px;height:50px;background:rgba(255,255,255,.14);border-radius:16px;font-size:27px;color:#fff}
+.brand h1{color:#fff;letter-spacing:.015em;font-size:clamp(19px,2.2vw,25px)}.brand p{color:#d8e9ff;font-weight:700;letter-spacing:.07em}
+.header-controls{display:flex;align-items:center;gap:9px}
+.header-icon-button{min-width:44px;width:44px;height:44px;min-height:44px;padding:6px;border-radius:13px;color:white;background:rgba(255,255,255,.12);font-size:21px;position:relative}
+.header-icon-button:hover,.header-profile:hover{background:rgba(255,255,255,.2)}
+.header-alert-dot{position:absolute;width:9px;height:9px;border-radius:50%;right:8px;top:6px;background:#ff6569;border:2px solid #0e58cc}
+.header-profile{display:flex;align-items:center;gap:9px;color:#fff;background:transparent;border-radius:13px;min-height:47px;padding:4px 10px;font-size:12px}
+.header-avatar{width:37px;height:37px;flex:0 0 37px;display:grid;place-items:center;border-radius:50%;background:#eaf4ff;color:#0c58c8;font-weight:800;font-size:13px}
+.header-user-label{display:flex;align-items:flex-start;flex-direction:column;gap:1px;line-height:1.4}.header-user-label strong{font-size:12px}.header-user-label small{color:#daeaff;font-size:10px}
+.signout{background:rgba(255,255,255,.12);color:#fff;font-size:11px;min-height:40px;border-radius:10px}.signout:hover{background:rgba(255,255,255,.22)}
+main{width:min(1320px,calc(100% - 44px));margin:24px auto 16px}
+.panel{border-radius:19px;border:1px solid #e4ecf9;box-shadow:var(--ui-shadow);background:var(--ui-surface)}
+h2{color:#14345c;font-size:19px}p{color:#697f9f}
+.overview{gap:18px;margin:0 0 20px;flex-wrap:wrap}
+.welcome{display:flex;flex-direction:row;align-items:center;gap:12px;flex:1 1 240px}
+.welcome-sun{width:50px;height:50px;flex:0 0 50px;display:grid;place-items:center;background:#fff3de;border-radius:50%;font-size:26px;color:#e6a523}
+.welcome-copy{min-width:0;display:flex;flex-direction:column;gap:2px}
+.welcome-title{font-size:20px;color:#17375f;line-height:1.4}
+.welcome-subtitle{font-size:11px;color:#7287a6}
+.account-email{font-size:11px;color:#8295b1}
+.task-total{display:flex;align-items:center;padding:11px 18px;min-height:60px;border-radius:15px;background:#e6f0ff;color:#1252be;border:1px solid #e0eaff}
+.task-total:before{content:'▤';display:grid;place-items:center;width:36px;height:36px;margin-right:5px;border-radius:10px;background:#d3e6ff;color:#0759ce;font-size:21px}
+.task-total strong{font-size:26px}.task-total span{font-size:11px;white-space:normal;max-width:68px;line-height:1.3}
+.desktop-tools{display:flex;align-items:center;gap:6px;flex-wrap:wrap;background:#e8f0fd;border-radius:16px;padding:5px}
+.desktop-tools button{border-radius:12px;white-space:nowrap;font-size:12px;min-height:43px;padding:9px 14px;background:transparent;color:#2f578d}
+.desktop-tools button:hover,.desktop-tools button:focus-visible{background:#d7e8ff}
+#appView[data-pane="list"] #desktopJobsBtn,#appView[data-pane="notifications"] #desktopNoticeBtn,#appView[data-pane="admin"] #desktopAdminBtn{background:var(--ui-blue);color:#fff;box-shadow:0 4px 13px #2169d12b}
+.notification-bar{border:1px solid #e2eaf7;border-radius:13px;box-shadow:0 2px 12px #205ca40a;max-width:100%;padding:10px 14px;margin-bottom:15px}
+.notification-bar:not(.hide) .notification-info strong{font-size:12px;color:#23528d}
+.notification-info p{font-size:11px}
+.workspace{grid-template-columns:minmax(0,1fr) minmax(0,1.13fr);gap:17px;align-items:start}
+.form-panel,.list-panel{padding:23px}
+.panel-header{margin-bottom:21px}
+.panel-heading{min-width:0}.panel-subtitle{margin:3px 0 0;font-size:11px;line-height:1.55;color:#7b8fad}
+.form-header{justify-content:flex-start;gap:12px}
+.form-header .panel-heading{flex:1}
+.form-symbol,.list-symbol{width:41px;height:41px;border-radius:13px;display:grid;place-items:center;flex:0 0 41px;font-size:23px;background:#e8f2ff;color:#0e60df}
+.form-symbol{background:#2377ed;color:white;border-radius:50%;font-size:26px}
+.list-heading{display:flex;align-items:center;gap:9px;min-width:0;flex:1}
+.list-header{gap:8px;flex-wrap:wrap}
+.list-header .sync-status{order:3;flex-basis:100%;max-width:none;text-align:left;font-size:10px;color:#8598b0;margin:-6px 0 0 50px}
+.list-header #reloadBtn{margin-left:auto;white-space:nowrap;background:#ebf3ff;border-radius:11px;padding:7px 12px}
+.field label,.default-controls label{color:#263f60;font-size:12px}
+.field input,.default-controls input{min-height:49px;border-color:#dce6f4;border-radius:11px;color:#213c63;font-size:13px}
+.field input:focus,.default-controls input:focus{border-color:#478af0;box-shadow:0 0 0 3px #0d5ee522}
+.preview-box{background:#eff5ff;border-color:#e1eafa;border-radius:12px;padding:15px}
+.preview-title strong{font-size:12px;color:#1e467c}.preview-title span{color:#7a92b1}.preview-list{color:#6b86aa}
+.preview-chip{border-color:#e0eafb}.preview-chip strong{color:#145bbd}.preview-chip.is-today{border-color:#86bbff;background:#deedff}
+.save-button{min-height:49px;font-size:13px}
+.form-actions .secondary{background:#e8f1fe;color:#1c58b3}
+.settings-details{border-color:#e7eef9}
+.settings-details summary{color:#587399}
+.settings-details summary span:first-child{background:#e4eeff;color:#1459ba}
+.filters{gap:8px;margin:1px 0 16px;flex-wrap:wrap}
+.filter{border-radius:100px;padding:8px 12px;min-height:37px;background:#edf3ff;color:#28558f;font-size:11px;white-space:nowrap}
+.filter.is-active{background:var(--ui-blue);color:white}
+.filter-count{display:inline-flex;align-items:center;justify-content:center;background:#dceaff;color:#195bc2;min-width:18px;height:18px;border-radius:100px;padding:0 4px;font-size:10px;margin-left:3px}
+.filter.is-active .filter-count{background:#fff;color:#135bdd}
+.filter[data-filter="soon"] .filter-count{background:#fff0ce;color:#bd7405}
+.filter[data-filter="past"] .filter-count{background:#ffe4e8;color:#cf3b48}
+.tasks{gap:8px}.task{gap:12px;border:1px solid #e3ecf8;border-radius:13px;padding:13px 15px;align-items:center;border-left:1px solid #e3ecf8}
+.task:has(.pill.soon),.task:has(.pill.done),.task:has(.pill.warn){border-left-color:#e3ecf8}
+.task-content{min-width:0}
+.task h3{color:#1a375f;font-size:12px;line-height:1.5;margin:0 0 5px;font-weight:700}
+.task-meta{gap:4px 12px;font-size:11px;color:#7890ae;align-items:center}
+.task-meta .date,.task-meta .time{font-size:11px;color:#7791b3}
+.pill{border-radius:100px;font-size:10px;padding:5px 10px}
+.pill.ok{background:#e7f0ff;color:#1559cb}
+.pill.soon{background:#fff2d9;color:#ac6d09}
+.pill.done{background:#ffe8ea;color:#c52d46}
+.pill.warn{background:#fff2d9;color:#9e6a12}
+.task-actions .edit-action,.task-actions .desktop-delete{display:none!important}
+.task-actions .more-action{display:grid;place-items:center;padding:4px 7px;min-width:39px;min-height:42px;background:transparent;color:#24568f;font-size:23px}
+.task-actions .more-action:hover{background:#e9f2ff}
+.empty{background:#f9fcff;border-color:#d9e6f8;color:#8aa0ba}
+.empty .empty-add{color:#195bac;background:#e6f4ff}
+.toast{background:#1c61c5;border-radius:13px;right:max(20px,calc((100vw - 1320px)/2))}
+.toast.error{background:#b63c49}
+footer{color:#97a8bf;font-size:10px}
+.inbox-wrap{border-color:#e4ebf7;border-radius:14px;background:#fbfdff}.inbox-wrap h3{color:#204d86}
+.inbox-item{border-color:#e0eaf6;border-radius:12px;padding:13px}
+.inbox-item strong{color:#1d5a99}
+.admin-cards{gap:14px;margin:18px 0 15px}
+.admin-cards>div{background:linear-gradient(125deg,#e7f2ff,#edf4ff);border-color:#d9e8fa;border-radius:16px;min-height:120px;padding:22px}
+.admin-cards>div:nth-child(2){background:linear-gradient(125deg,#f2ecff,#eaf0ff)}
+.admin-cards strong{color:#1556c3;font-size:34px}
+.admin-cards>div:nth-child(2) strong{color:#5c45c3}
+.admin-quick{padding:18px 23px;align-items:center;justify-content:space-between;gap:16px;display:flex}
+.admin-quick-head{display:flex;align-items:center;gap:13px}
+.admin-quick-icon{display:grid;place-items:center;flex:0 0 42px;width:42px;height:42px;border-radius:14px;background:#e6f1ff;color:#0f60d8;font-size:26px}
+.admin-quick .panel-subtitle{margin:4px 0 0}
+.admin-quick .secondary{white-space:nowrap}
+.action-dialog,.import-dialog{box-shadow:0 20px 70px #0c2d6345}
+.login-panel{box-shadow:var(--ui-shadow)}
+.login-panel h2{color:#143e79}.login-symbol{background:#e4f0ff}
+/* Desktop dashboard keeps existing real notification entries and a permission-limited admin shortcut. */
+@media(min-width:721px){
+  #appView[data-pane="list"].has-inbox #notificationsPane{display:block;grid-column:1/-1;padding:20px}
+  #appView[data-pane="list"] #adminQuickPanel:not(.hide){grid-column:1/-1}
+  #appView[data-pane="list"].has-inbox.is-admin #notificationsPane{grid-column:1}
+  #appView[data-pane="list"].has-inbox.is-admin #adminQuickPanel:not(.hide){grid-column:2}
+  #appView[data-pane="list"] #notificationsPane .panel-header{margin-bottom:10px}
+  #appView[data-pane="list"] #notificationsPane .inbox-wrap{margin:0}
+  #appView[data-pane="list"] #notificationsPane .inbox-list{max-height:220px;overflow-y:auto}
+  .form-panel,.list-panel{min-width:0}
+}
+@media(max-width:1080px) and (min-width:721px){
+  .topbar{padding:13px 24px}.overview{gap:10px}.welcome{flex-basis:260px}.desktop-tools{order:3;margin-left:auto}
+  .workspace{grid-template-columns:minmax(0,1fr) minmax(0,1.07fr);gap:13px}
+  .form-panel,.list-panel{padding:18px}.task{padding:12px 10px}
+}
+@media(max-width:720px){
+  body{background:#f2f6ff}
+  .topbar{min-height:72px;padding:calc(12px + env(safe-area-inset-top)) 14px 12px}
+  .brand{gap:9px}.brand-icon{flex:0 0 43px;width:43px;height:43px;border-radius:12px;font-size:24px}
+  .brand h1{font-size:19px}.brand p{font-size:10px}
+  .header-controls{gap:5px}.header-icon-button{width:38px;min-width:38px;height:42px;min-height:42px;font-size:19px}
+  .header-profile{padding:2px}.header-avatar{width:37px;height:37px;flex-basis:37px}.header-user-label{display:none}
+  main{width:calc(100% - 24px);margin:18px auto max(100px,calc(94px + env(safe-area-inset-bottom)))}
+  .overview{gap:8px;flex-wrap:nowrap;margin:0 1px 17px}
+  .welcome{gap:9px;flex:1 1 0;min-width:0}
+  .welcome-sun{width:36px;height:36px;flex-basis:36px;font-size:21px}
+  .welcome-title{font-size:14px;line-height:1.5}.welcome-title strong{display:block;font-size:16px}
+  .welcome-subtitle{font-size:10px;line-height:1.45}.account-email{display:none}
+  .task-total{padding:8px 9px;min-height:54px;gap:4px}.task-total:before{display:none}.task-total strong{font-size:23px}.task-total span{font-size:10px;max-width:52px}
+  .notification-bar{padding:9px 12px;border-radius:13px;margin-bottom:13px;gap:7px}
+  .notification-bar:not(.hide) .notification-info strong{font-size:11px}
+  .notification-info p{font-size:10px}.push-button{font-size:10px;white-space:nowrap;padding:6px 9px}
+  #appView:not([data-pane="list"]) .overview,#appView:not([data-pane="list"]) .notification-bar{display:none}
+  .workspace{display:block}.mobile-pane{display:none!important}.mobile-pane.is-mobile-active{display:block!important}
+  .panel{border:1px solid #e6edf9;border-radius:21px;box-shadow:var(--ui-shadow)}
+  .form-panel,.list-panel,.detail-panel{padding:18px 14px 22px}
+  .panel-header{margin-bottom:16px}.panel-header h2{font-size:19px}
+  .list-symbol{width:32px;height:32px;flex-basis:32px;font-size:20px}
+  .list-heading{gap:8px}.list-header{align-items:flex-start}
+  .list-header .panel-subtitle{font-size:10px}
+  .list-header .sync-status{order:3;margin:0;flex-basis:100%;font-size:10px}
+  .list-header #reloadBtn{font-size:11px;padding:7px 9px;min-height:37px}
+  .filters{flex-wrap:nowrap;gap:5px;overflow-x:auto;scrollbar-width:none;margin:0 0 17px;padding:1px}
+  .filters::-webkit-scrollbar{display:none}
+  .filter{flex:1 0 auto;padding:8px 9px;font-size:10px;min-height:36px}
+  .task{flex-direction:row;align-items:flex-start;gap:6px;padding:12px 9px;border-radius:13px}
+  .task h3{font-size:12px}.task-meta{gap:4px 9px}.task-meta .date,.task-meta .time{font-size:10px}
+  .task-actions .more-action{display:grid;min-width:34px;min-height:42px;font-size:23px}
+  .task-actions .edit-action,.task-actions .desktop-delete{display:none!important}
+  .pill{font-size:9px;padding:4px 8px}
+  .fab{width:58px;height:58px;min-height:58px;right:19px;bottom:calc(87px + env(safe-area-inset-bottom));box-shadow:0 8px 23px #0950b44a}
+  .bottom-nav{padding:7px 7px calc(8px + env(safe-area-inset-bottom));border-top:1px solid #e7edfa}
+  .bottom-nav-button{min-height:56px;font-size:10px;border-radius:12px}
+  .bottom-nav-button span{font-size:23px}
+  .bottom-nav-button.is-active{background:#e9f2ff}
+  .form-panel .panel-header{gap:8px}.form-symbol{display:none}
+  .date-time-fields{grid-template-columns:1fr 1fr;gap:10px}
+  .admin-quick{display:none!important}
+  .admin-cards>div{padding:20px 15px;min-height:116px}
+  .toast{top:calc(80px + env(safe-area-inset-top));right:12px}
+  footer{display:none}
+}
+@media(max-width:380px){
+  .brand h1{font-size:16px}.brand-icon{width:38px;flex-basis:38px;height:38px}
+  .header-icon-button{min-width:35px;width:35px}.header-avatar{width:34px;height:34px;flex-basis:34px}
+  .welcome-sun{display:none}.welcome-title strong{font-size:14px}
+  .list-symbol{display:none}.list-header #reloadBtn{min-height:35px}
+  .task-total{padding:7px 8px}.task-total strong{font-size:20px}
+  .task-meta{gap:3px 7px}.pill{font-size:9px}
+  .date-time-fields{grid-template-columns:1fr}
+}
+@media(prefers-reduced-motion:reduce){button{transition:none}}
+/* Mobile header: no duplicate desktop tabs above the fixed bottom navigation. */
+@media(max-width:720px){
+  .overview .desktop-tools{display:none!important}
+  .overview .welcome{min-width:0;flex:1 1 auto;width:auto}
+  .overview .welcome-copy{min-width:0;max-width:100%}
+  .overview .task-total{flex:0 0 auto}
+}

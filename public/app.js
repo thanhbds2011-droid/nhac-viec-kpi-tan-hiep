@@ -90,6 +90,8 @@ function visibleTasks(){
 function renderTasks(){
   const count=state.tasks.filter(t=>dayDiff(t.dueDate)>=0).length;
   $('taskCount').textContent=count;$('mobileCount').textContent=state.tasks.length;
+  $('soonCount').textContent=state.tasks.filter(t=>{const d=dayDiff(t.dueDate);return d>=0&&d<=3;}).length;
+  $('pastCount').textContent=state.tasks.filter(t=>dayDiff(t.dueDate)<0).length;
   const box=$('taskList');box.replaceChildren();
   const tasks=visibleTasks();
   if(!tasks.length){
@@ -121,6 +123,8 @@ function renderTasks(){
 function renderInbox(){
   const root=$('managerInbox');root.replaceChildren();
   $('inboxCount').textContent=String(state.inbox.length);
+  $('appView').classList.toggle('has-inbox',state.inbox.length>0);
+  $('headerNoticeDot').classList.toggle('hide',state.inbox.length===0);
   if(!state.inbox.length){root.textContent='Không có công việc nào của nhân viên đang chờ bạn xem xét.';return;}
   for(const notice of state.inbox){
     const el=document.createElement('article');el.className='inbox-item';
@@ -548,7 +552,10 @@ async function signedIn(response){
     $('profileName').textContent=name;$('profileEmail').textContent=data.email;
     const initials=name.split(/\s+/).slice(-2).map(s=>s[0]||'').join('').toUpperCase();
     $('profileAvatar').textContent=initials||'NV';
-    updateData(data);$('adminShortcut').classList.toggle('hide',!state.isAdmin);$('desktopAdminBtn').classList.toggle('hide',!state.isAdmin);$('loginView').classList.add('hide');$('appView').classList.remove('hide');
+    $('headerUserAvatar').textContent=initials||'NV';$('headerUserName').textContent=name;
+    $('headerNoticeBtn').classList.remove('hide');$('headerProfileBtn').classList.remove('hide');
+    updateData(data);$('adminShortcut').classList.toggle('hide',!state.isAdmin);$('desktopAdminBtn').classList.toggle('hide',!state.isAdmin);
+    $('adminQuickPanel').classList.toggle('hide',!state.isAdmin);$('appView').classList.toggle('is-admin',state.isAdmin);$('loginView').classList.add('hide');$('appView').classList.remove('hide');
     $('signoutBtn').classList.remove('hide');resetForm();showPane('list');
     // Asynchronous login; never block the task list while SDK loads.
     state.pushBoundAccount='';state.pushError='';
@@ -569,7 +576,9 @@ async function signout(){
   if(window.google?.accounts?.id)window.google.accounts.id.disableAutoSelect();
   window.postMessage({kind:'TAN_HIEP_ICPV_ACCOUNT_CONTEXT_V1',id:''},location.origin);
   state.credential='';state.sessionToken='';state.user=null;state.tasks=[];state.inbox=[];state.deletedSourceKeys=[];state.isAdmin=false;state.managerConfigured=false;state.editingId=null;state.pushBoundAccount='';state.pushError='';
-  $('desktopAdminBtn').classList.add('hide');$('appView').classList.add('hide');$('signoutBtn').classList.add('hide');$('loginView').classList.remove('hide');
+  $('desktopAdminBtn').classList.add('hide');$('adminQuickPanel').classList.add('hide');
+  $('headerNoticeBtn').classList.add('hide');$('headerProfileBtn').classList.add('hide');
+  $('appView').classList.remove('is-admin','has-inbox');$('appView').classList.add('hide');$('signoutBtn').classList.add('hide');$('loginView').classList.remove('hide');
   $('loginHint').textContent='Bạn đã đăng xuất. Đăng nhập lại để quản lý công việc.';
   state.signingOut=false;setBusy(false);
 }
@@ -599,6 +608,9 @@ async function start(){
   $('desktopJobsBtn').addEventListener('click',()=>showPane('list'));
   $('desktopNoticeBtn').addEventListener('click',()=>{showPane('notifications');void refresh();});
   $('desktopAdminBtn').addEventListener('click',()=>{if(state.isAdmin)showPane('admin');});
+  $('adminQuickOpen').addEventListener('click',()=>{if(state.isAdmin)showPane('admin',true);});
+  $('headerNoticeBtn').addEventListener('click',()=>{showPane('notifications',true);void refresh();});
+  $('headerProfileBtn').addEventListener('click',()=>showPane('profile',true));
   $('adminShortcut').addEventListener('click',()=>showPane('admin',true));
   $('adminBack').addEventListener('click',()=>showPane('profile',true));
   document.addEventListener('visibilitychange',()=>{if(!document.hidden)void checkRevision();});
