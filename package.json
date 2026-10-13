@@ -1,8 +1,8 @@
 {
   "name": "nhac-viec-kpi-tan-hiep",
-  "version": "1.9.0",
+  "version": "1.9.1",
   "private": true,
-  "description": "Nhắc việc KPI Tân Hiệp: giao diện Desktop, iOS, Android theo mẫu đã duyệt; giữ nguyên nghiệp vụ v1.8.0",
+  "description": "Nhắc việc KPI Tân Hiệp: YC-033 tương thích, đồng bộ đa thiết bị; bảo toàn nghiệp vụ V1.8.0",
   "type": "commonjs",
   "engines": {
     "node": ">=20"

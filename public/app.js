@@ -1,9 +1,17 @@
 'use strict';
+// YC-033: Safari/iOS versions before 14 may not implement replaceChildren.
+// Every call in this application clears a container; do not introduce a dependency.
+if(typeof Element!=='undefined'&&!Element.prototype.replaceChildren){
+  Element.prototype.replaceChildren=function(){
+    while(this.firstChild)this.removeChild(this.firstChild);
+    for(const child of arguments)this.appendChild(typeof child==='string'?document.createTextNode(child):child);
+  };
+}
 const $ = id => document.getElementById(id);
 const state = {
   config:null,credential:'',user:null,tasks:[],defaultTime:'07:30',editingId:null,
   onesignal:null,pushError:'',pushBoundAccount:'',busy:false,pushBusy:false,signingOut:false,sessionEpoch:0,filter:'all',
-  revision:0,inbox:[],deletedSourceKeys:[],isAdmin:false,managerConfigured:false,realtime:null,broadcast:null,realtimeEpoch:0,lastVersionCheck:0,queuedChanges:[],checkingVersion:false,sessionToken:'',reconcileAfterBusy:false
+  revision:0,inbox:[],deletedSourceKeys:[],isAdmin:false,managerConfigured:false,realtime:null,broadcast:null,localRevisionKey:'',realtimeEpoch:0,lastVersionCheck:0,queuedChanges:[],checkingVersion:false,sessionToken:'',reconcileAfterBusy:false
 };
 let identityQueue=Promise.resolve();
 let activeMobilePane='list';
@@ -229,7 +237,13 @@ function receiveChange(event){
   applyChange(event);
 }
 function emitTabChange(event){
-  if(state.broadcast)try{state.broadcast.postMessage(event);}catch(_){}
+  if(state.broadcast){try{state.broadcast.postMessage(event);return;}catch(_){}}
+  if(state.localRevisionKey&&Number.isSafeInteger(event?.revision)){
+    try{
+      // Never persist task titles, notice text, email or a session credential.
+      localStorage.setItem(state.localRevisionKey,JSON.stringify({revision:event.revision,nonce:Date.now()+'-'+Math.random()}));
+    }catch(_){/* Storage is unavailable; server refresh remains the fallback. */}
+  }
 }
 async function checkRevision(force=false){
   if(!state.user||state.busy||state.checkingVersion)return;
@@ -264,11 +278,16 @@ function loadAblySdk(){
 async function connectRealtime(){
   const epoch=state.sessionEpoch,externalId=state.user?.externalId;
   if(!externalId)return;
+  state.localRevisionKey='nhac-kpi-revision-'+externalId;
   if(typeof BroadcastChannel==='function'){
-    state.broadcast=new BroadcastChannel('nhac-kpi-'+externalId);
-    state.broadcast.onmessage=ev=>{if(epoch===state.sessionEpoch&&state.user?.externalId===externalId)receiveChange(ev.data);};
+    try{
+      state.broadcast=new BroadcastChannel('nhac-kpi-'+externalId);
+      state.broadcast.onmessage=ev=>{if(epoch===state.sessionEpoch&&state.user?.externalId===externalId)receiveChange(ev.data);};
+    }catch(err){state.broadcast=null;console.warn('BroadcastChannel không khả dụng:',err.message);}
   }
-  if(!state.config?.realtimeEnabled){syncIndicator('Đồng bộ giữa các tab trên thiết bị này');return;}
+  // Browsers without BroadcastChannel use a storage event containing REVISION ONLY.
+  // On restricted/private storage the normal server refresh remains available.
+  if(!state.config?.realtimeEnabled){syncIndicator('Đồng bộ khi có thay đổi hoặc mở lại ứng dụng');return;}
   try{
     const Ably=await loadAblySdk();
     if(epoch!==state.sessionEpoch||!state.user)return;
@@ -304,6 +323,7 @@ async function connectRealtime(){
 function disconnectRealtime(){
   clearTimeout(pushSyncTimer);
   if(state.broadcast){state.broadcast.close();state.broadcast=null;}
+  state.localRevisionKey='';
   if(state.realtime){try{state.realtime.close();}catch(_){}state.realtime=null;}
   state.queuedChanges=[];state.revision=0;state.lastVersionCheck=0;state.reconcileAfterBusy=false;
 }
@@ -362,20 +382,57 @@ async function saveTask(ev){
     state.tasks.push({id:temporary,title,dueDate,time,pending:4,warning:'',_optimistic:true});
   });
 }
+// YC-033: Safari below 15.4 has no native dialog API. Preserve the exact
+// existing confirmation actions with a keyboard- and touch-accessible fallback.
+function openAppDialog(dialog){
+  if(typeof dialog.showModal==='function'){dialog.showModal();return;}
+  dialog.returnValue='';
+  dialog.classList.add('compat-dialog-open');
+  dialog.setAttribute('open','');
+  dialog.setAttribute('role','dialog');
+  dialog.setAttribute('aria-modal','true');
+  const first=dialog.querySelector('button');
+  if(first)first.focus();
+}
+function closeAppDialog(dialog,result=''){
+  if(!dialog.classList.contains('compat-dialog-open')&&typeof dialog.close==='function'){
+    dialog.close(result);return;
+  }
+  dialog.returnValue=result;
+  dialog.classList.remove('compat-dialog-open');
+  dialog.removeAttribute('open');
+  dialog.removeAttribute('aria-modal');
+  dialog.dispatchEvent(new Event('close'));
+}
+function wireLegacyDialogs(){
+  const confirm=$('confirmDialog');
+  confirm.querySelectorAll('button[value]').forEach(button=>button.addEventListener('click',event=>{
+    if(!confirm.classList.contains('compat-dialog-open'))return;
+    event.preventDefault();closeAppDialog(confirm,button.value);
+  }));
+  confirm.querySelector('form').addEventListener('submit',event=>{
+    if(confirm.classList.contains('compat-dialog-open'))event.preventDefault();
+  });
+  document.addEventListener('keydown',event=>{
+    if(event.key!=='Escape')return;
+    const active=document.querySelector('dialog.compat-dialog-open');
+    if(active){event.preventDefault();closeAppDialog(active,'cancel');}
+  });
+}
 function openTaskMenu(t){
   if(state.busy)return;
   $('taskMenuTitle').textContent=t.title;
   $('taskMenuMeta').textContent=vnDate(t.dueDate)+' · '+t.time;
-  $('menuEdit').onclick=()=>{$('taskMenu').close();edit(t);};
-  $('menuDelete').onclick=()=>{$('taskMenu').close();remove(t);};
-  $('taskMenu').showModal();
+  $('menuEdit').onclick=()=>{closeAppDialog($('taskMenu'));edit(t);};
+  $('menuDelete').onclick=()=>{closeAppDialog($('taskMenu'));remove(t);};
+  openAppDialog($('taskMenu'));
 }
 async function remove(t){
   if(state.busy)return;
   $('confirmText').textContent=state.managerConfigured?
     `Bạn đã hoàn thành “${t.title}” trên iCPV? Trưởng phòng sẽ được thông báo để chấm điểm.`:
     `Bạn đã hoàn thành “${t.title}”? Chưa có thông tin Trưởng phòng nhận thông báo; hãy liên hệ quản trị viên.`;
-  const dialog=$('confirmDialog');dialog.showModal();
+  const dialog=$('confirmDialog');openAppDialog(dialog);
   dialog.addEventListener('close',function onClose(){
     dialog.removeEventListener('close',onClose);
     if(!['confirm','discard'].includes(dialog.returnValue)||state.busy)return;
@@ -395,6 +452,9 @@ function pushDeviceIssue(){
   const ua=String(navigator.userAgent||'');
   const ios=/iPhone|iPad|iPod/i.test(ua) || (/Macintosh/i.test(ua)&&navigator.maxTouchPoints>1);
   const standalone=Boolean(navigator.standalone)||Boolean(window.matchMedia?.('(display-mode: standalone)')?.matches);
+  const version=ios?ua.match(/OS (\d+)[_.](\d+)/):null;
+  if(version&&(Number(version[1])<16||(Number(version[1])===16&&Number(version[2])<4)))
+    return 'iPhone/iPad đang dùng iOS dưới 16.4 nên không hỗ trợ thông báo nền cho ứng dụng web. Bạn vẫn có thể quản lý và xem hạn công việc khi mở ứng dụng.';
   if(ios&&!standalone)return 'iPhone/iPad: mở bằng Safari → Chia sẻ → Thêm vào Màn hình chính; sau đó mở từ biểu tượng đã cài và bấm Bật thông báo. Yêu cầu iOS/iPadOS 16.4 trở lên.';
   if(!('Notification' in window)||!('serviceWorker' in navigator)||!('PushManager' in window))
     return 'Trình duyệt/thiết bị này chưa hỗ trợ Web Push. Hãy dùng Chrome/Edge phiên bản mới, hoặc iPhone/iPad có ứng dụng ở Màn hình chính (iOS 16.4+).';
@@ -428,11 +488,24 @@ function pushState(){
 
 }
 let sdkInitPromise=null;
+let sdkInitStartedAt=0;
+let sdkScriptRetried=false;
+function retryOneSignalScript(){
+  if(sdkScriptRetried||state.onesignal)return;
+  sdkScriptRetried=true;
+  const script=document.createElement('script');
+  script.async=true;
+  script.src='https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js';
+  script.setAttribute('data-push-retry','1');
+  script.onerror=()=>console.warn('OneSignal: không tải được SDK khi thử lại.');
+  document.head.appendChild(script);
+}
 function sdk(){
   if(state.onesignal)return Promise.resolve(state.onesignal);
   // A stalled CDN must not permanently cache a rejected Promise. Reuse a single SDK init callback.
   if(!sdkInitPromise){
-    sdkInitPromise=new Promise((resolve,reject)=>{
+    sdkInitStartedAt=Date.now();
+    const initial=new Promise((resolve,reject)=>{
       window.OneSignalDeferred=window.OneSignalDeferred||[];
       window.OneSignalDeferred.push(async o=>{
         try{
@@ -445,6 +518,10 @@ function sdk(){
         }catch(err){reject(err);}
       });
     });
+    // A genuine SDK initialization rejection must be retryable; an ordinary
+    // 15-second CDN timeout keeps waiting for its original callback.
+    const shared=initial.catch(err=>{if(sdkInitPromise===shared)sdkInitPromise=null;throw err;});
+    sdkInitPromise=shared;
   }
   return new Promise((resolve,reject)=>{
     const timeout=setTimeout(()=>reject(new Error('OneSignal chưa tải xong sau 15 giây. Kiểm tra Internet, trình chặn quảng cáo hoặc tường lửa, sau đó thử lại.')),15000);
@@ -499,7 +576,9 @@ async function enablePush(){
   // Do NOT await SDK login/network before requesting the native permission dialog.
   const o=state.onesignal;
   if(!o){
-    state.pushError='Đang chuẩn bị thông báo. Hãy thử bấm Bật thông báo lại sau khi trang đã tải xong.';
+    // Retry loading once only if the first script stalled; do not spam SDK/CDN requests.
+    if(sdkInitStartedAt&&Date.now()-sdkInitStartedAt>=15000)retryOneSignalScript();
+    state.pushError='Đang kết nối dịch vụ thông báo. Hãy chờ ít giây rồi thử lại nếu chưa sẵn sàng.';
     pushState();
     void initPush(state.user.externalId).catch(()=>{});
     notify(state.pushError,true);return;
@@ -557,9 +636,10 @@ async function signedIn(response){
     updateData(data);$('adminShortcut').classList.toggle('hide',!state.isAdmin);$('desktopAdminBtn').classList.toggle('hide',!state.isAdmin);
     $('adminQuickPanel').classList.toggle('hide',!state.isAdmin);$('appView').classList.toggle('is-admin',state.isAdmin);$('loginView').classList.add('hide');$('appView').classList.remove('hide');
     $('signoutBtn').classList.remove('hide');resetForm();showPane('list');
-    // Asynchronous login; never block the task list while SDK loads.
+    // Asynchronous login; never block the task list or load a push SDK on unsupported devices.
     state.pushBoundAccount='';state.pushError='';
-    void initPush(data.externalId).catch(()=>{});
+    if(pushDeviceIssue())pushState();
+    else void initPush(data.externalId).catch(()=>{});
     void connectRealtime();
     // The Chrome extension delivers staged data only after successful Google login.
     window.postMessage({kind:'TAN_HIEP_ICPV_IMPORT_READY_V1'},location.origin);
@@ -571,7 +651,7 @@ async function signout(){
   state.signingOut=true;state.sessionEpoch++;disconnectRealtime();setBusy(true);
   try{
     // Serialize with an in-progress OneSignal.login to prevent cross-account binding.
-    await queueIdentity(async()=>{if(sdkInitPromise){const o=await sdk();await o.logout();}});
+    await queueIdentity(async()=>{if(state.onesignal)await state.onesignal.logout();});
   }catch(err){notify('Chưa thể ngắt OneSignal khỏi thiết bị. Hãy kiểm tra trạng thái thông báo trước khi dùng tài khoản khác.',true);}
   if(window.google?.accounts?.id)window.google.accounts.id.disableAutoSelect();
   window.postMessage({kind:'TAN_HIEP_ICPV_ACCOUNT_CONTEXT_V1',id:''},location.origin);
@@ -590,8 +670,9 @@ function setFilter(name){
   });renderTasks();
 }
 async function start(){
+  wireLegacyDialogs();
   window.addEventListener('message',receiveImportFromExtension);
-  $('importCancel').addEventListener('click',()=>{pendingImport=null;$('importDialog').close();});
+  $('importCancel').addEventListener('click',()=>{pendingImport=null;closeAppDialog($('importDialog'));});
   $('importApply').addEventListener('click',()=>void confirmImport());
   Object.entries(NAV_IDS).forEach(([pane,id])=>$(id).addEventListener('click',()=>showPane(pane,true)));
   $('tabCreate').addEventListener('click',()=>{resetForm();showPane('create',true);});
@@ -614,14 +695,27 @@ async function start(){
   $('adminShortcut').addEventListener('click',()=>showPane('admin',true));
   $('adminBack').addEventListener('click',()=>showPane('profile',true));
   document.addEventListener('visibilitychange',()=>{if(!document.hidden)void checkRevision();});
+  window.addEventListener('storage',event=>{
+    if(!state.user||!state.localRevisionKey||event.key!==state.localRevisionKey||!event.newValue)return;
+    try{
+      const message=JSON.parse(event.newValue);
+      if(!Number.isSafeInteger(message.revision)||message.revision<=state.revision)return;
+      if(state.busy){state.reconcileAfterBusy=true;return;}
+      void checkRevision(true); // Always verify actual state from authenticated server.
+    }catch(_){}
+  });
   window.addEventListener('online',()=>{syncIndicator('Đã có mạng · Đang kiểm tra…');void checkRevision(true);});
-  $('menuClose').addEventListener('click',()=>$('taskMenu').close());
+  $('menuClose').addEventListener('click',()=>closeAppDialog($('taskMenu')));
   document.querySelectorAll('[data-filter]').forEach(button=>button.addEventListener('click',()=>setFilter(button.dataset.filter)));
   resetForm();showPane('list');
-  // Use the exact same OneSignal worker and scope for PWA install; never register a competing worker.
-  if('serviceWorker' in navigator)window.addEventListener('load',()=>{
-    navigator.serviceWorker.register('/OneSignalSDKWorker.js',{scope:'/'}).catch(err=>console.warn('Service worker:',err.message));
-  },{once:true});
+  // Use the same OneSignal worker and scope, never create a competing PWA worker.
+  // If start() begins after load, the old load-only listener never ran on slow devices.
+  if('serviceWorker' in navigator){
+    const registerWorker=()=>navigator.serviceWorker.register('/OneSignalSDKWorker.js',{scope:'/'})
+      .catch(err=>console.warn('Service worker:',err.message));
+    if(document.readyState==='complete')void registerWorker();
+    else window.addEventListener('load',registerWorker,{once:true});
+  }
   try{
     const response=await fetch('/api/config',{cache:'no-store'}),cfg=await response.json();
     if(!response.ok)throw new Error(cfg.error||'Chưa cài cấu hình Vercel.');
@@ -695,7 +789,7 @@ function receiveImportFromExtension(event){
   }
   $('importInfo').textContent='Đã đọc '+clean.length+' nhiệm vụ trên trang iCPV đang mở. '+initialAdd+
     ' mục đề xuất thêm; '+checkCount+' mục cần rà soát. Bạn tự quyết định cập nhật, thêm mới hoặc bỏ qua. Các công việc cũ không tự thay đổi.';
-  $('importDialog').showModal();
+  openAppDialog($('importDialog'));
 }
 async function confirmImport(){
   if(!pendingImport||state.busy)return;
@@ -712,7 +806,7 @@ async function confirmImport(){
     if(kind==='update'&&!targetId){notify('Hãy chọn công việc đang theo dõi để cập nhật.',true);return;}
     decisions.push({sourceKey:original.sourceKey,title,dueDate,kind,targetId:kind==='update'?targetId:''});
   }
-  if(!decisions.length){$('importDialog').close();pendingImport=null;notify('Đã giữ nguyên công việc hiện có.');return;}
+  if(!decisions.length){closeAppDialog($('importDialog'));pendingImport=null;notify('Đã giữ nguyên công việc hiện có.');return;}
   const button=$('importApply');button.disabled=true;
   const old=button.textContent;button.textContent='Đang cập nhật…';setBusy(true);
   let checkAfterFailure=false;
@@ -721,7 +815,7 @@ async function confirmImport(){
     updateData(r);
     if(r.change)emitTabChange({revision:r.revision,change:r.change});
     if(r.needsSync)kickOneSignalSync();
-    $('importDialog').close();pendingImport=null;
+    closeAppDialog($('importDialog'));pendingImport=null;
     notify(r.notice||'Đã xử lý các công việc được chọn.');showPane('list',true);
   }catch(err){notify(err.message,true);checkAfterFailure=true;}
   finally{setBusy(false);button.disabled=false;button.textContent=old;flushChanges();
