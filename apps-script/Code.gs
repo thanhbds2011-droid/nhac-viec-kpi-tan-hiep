@@ -148,6 +148,9 @@ function validateVietnameseAdminSheets(){
     if(!key||!String(r[1]||'').trim())problems.push('Phòng/Khu dòng '+(i+2)+': thiếu mã hoặc tên.');
     if(byUnit[key])problems.push('Phòng/Khu dòng '+(i+2)+': mã Phòng/Khu bị trùng.');
     byUnit[key]=true;
+    // BGD là nhóm lãnh đạo, không bắt buộc Trưởng/Phó phòng hay Ban Giám đốc phụ trách.
+    // Các cột C/D/E của dòng BGD có thể chứa dữ liệu lịch sử; không dùng để định tuyến KPI.
+    if(isLeadershipUnit_(key))return;
     var m=byEmail[manager];
     if(routingV2_()&&!manager){
       var acting=String(r[5]||'').trim().toLowerCase();
@@ -213,8 +216,9 @@ function onOpen(){
     .addItem('5. Bổ sung cột quyền quản trị','prepareAdminPermissionColumn')
     .addSeparator().addItem('6. Chuẩn bị phân công KPI','prepareKpiRoutingSheets')
     .addItem('7. Kiểm tra phân công KPI','inspectKpiRoutingSheets')
-    .addItem('8. Kích hoạt phân công KPI','activateKpiRoutingSheets')
-    .addItem('9. Tắt phân công KPI V2','rollbackKpiRoutingSheets').addToUi();}catch(_e){}
+    .addItem('8. Bổ sung lựa chọn chức vụ KPI','prepareKpiRoleDropdowns')
+    .addItem('9. Kích hoạt phân công KPI','activateKpiRoutingSheets')
+    .addItem('10. Tắt phân công KPI V2','rollbackKpiRoutingSheets').addToUi();}catch(_e){}
 }
 
 function jsonOutput_(o){return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON);}
@@ -268,6 +272,8 @@ function routingV2_(){
   if(typeof PropertiesService==='undefined')return false; // Old VM fixtures have no Script Properties.
   return isVietnameseSchema_()&&prop_(KPI_ROUTING_KEY)==='V2';
 }
+/** BGD là nhóm lãnh đạo cấp đơn vị, không phải Phòng/Khu gửi KPI lên người đứng đầu. */
+function isLeadershipUnit_(unit){return textKey_(unit)==='BGD';}
 function kpiAssignmentKey_(unit,role){return String(unit||'').trim()+'::'+String(role||'').trim();}
 function kpiRows_(ss){
   var sh=ss.getSheetByName(SHEET_KPI_ASSIGNMENTS);
@@ -306,7 +312,8 @@ function approvedRecipient_(ss,email){
   var active=activeEmailMap_(ss);if(!active[normalized]||!active[normalized].active)return false;
   var catalog=assignmentCatalog_(ss);
   return Object.keys(catalog.departments).some(function(unit){
-    var d=catalog.departments[unit];return !d.invalid&&!(d.head&&d.acting)&&(d.head===normalized||d.acting===normalized||d.director===normalized);
+    var d=catalog.departments[unit];return !isLeadershipUnit_(unit)&&!d.invalid&&!(d.head&&d.acting)&&
+      (d.head===normalized||d.acting===normalized||d.director===normalized);
   });
 }
 function routingRecipient_(ss,sourceEmail,assignmentKey,catalog,active){
@@ -314,12 +321,14 @@ function routingRecipient_(ss,sourceEmail,assignmentKey,catalog,active){
   var assigned=list.filter(function(a){return a.key===assignmentKey;});
   if(assigned.length!==1)return null;
   var a=assigned[0],dept=catalog.departments[a.unit];
-  if(!dept||dept.invalid||(dept.head&&dept.acting)||(!dept.head&&!dept.acting))return null;
+  if(!dept||isLeadershipUnit_(a.unit)||dept.invalid||(dept.head&&dept.acting)||(!dept.head&&!dept.acting))return null;
   var recipient=['EMPLOYEE','VICE'].indexOf(a.role)!==-1?(dept.acting||dept.head):
     ['MANAGER','ACTING'].indexOf(a.role)!==-1?dept.director:'';
   if(!recipient||recipient===String(sourceEmail||'').toLowerCase()||!active[recipient]||!active[recipient].active)return null;
+
   var destList=catalog.assignments[recipient]||[];
   var wantRole=['EMPLOYEE','VICE'].indexOf(a.role)!==-1?(dept.acting?'ACTING':'MANAGER'):'DIRECTOR';
+  if(wantRole==='DIRECTOR'&&active[recipient].role!=='DIRECTOR')return null;
   if(!destList.some(function(x){return x.unit===a.unit&&x.role===wantRole;}))return null;
   return {email:recipient,name:active[recipient].name,unit:a.unit,unitName:dept.name,role:a.role};
 }
@@ -360,6 +369,25 @@ function prepareKpiRoutingSheets(){
   SpreadsheetApp.flush();
   return 'Đã chuẩn bị Phân công KPI và cột F/G của Quản lý Phòng-Khu, chưa kích hoạt. Hãy điền Ban Giám đốc và kiểm tra trước.';
 }
+/**
+ * Chỉ người quản trị tự chạy sau khi sao lưu, để CÓ THỂ chọn vai trò mới trong Sheet.
+ * Không sửa giá trị tài khoản, phân công, trạng thái hay State; không bật phân quyền V2.
+ */
+function prepareKpiRoleDropdowns(){
+  if(!isVietnameseSchema_())throw new Error('Cần sử dụng tab Tài khoản tiếng Việt.');
+  var ss=book_(),users=ss.getSheetByName(SHEET_USERS),assignments=ss.getSheetByName(SHEET_KPI_ASSIGNMENTS);
+  if(!users||!assignments)throw new Error('Thiếu Tài khoản hoặc Phân công KPI. Hãy kiểm tra tab hiện có.');
+  if(String(users.getRange(1,4).getDisplayValue()||'').trim()!=='Vai trò'||
+     String(assignments.getRange(1,3).getDisplayValue()||'').trim()!=='Chức vụ tại Phòng/Khu')
+    throw new Error('Tiêu đề cột chức vụ không đúng. Không thay đổi xác thực dữ liệu.');
+  var list=['Nhân viên','Phó Trưởng phòng/Khu','Trưởng phòng/Khu',
+    'Quyền Trưởng phòng/Khu','Ban Giám đốc','Quản trị viên'];
+  var rule=SpreadsheetApp.newDataValidation().requireValueInList(list,true).setAllowInvalid(false).build();
+  if(users.getMaxRows()>1)users.getRange(2,4,users.getMaxRows()-1,1).setDataValidation(rule);
+  if(assignments.getMaxRows()>1)assignments.getRange(2,3,assignments.getMaxRows()-1,1).setDataValidation(rule);
+  SpreadsheetApp.flush();
+  return 'Đã cho phép chọn Ban Giám đốc/Quyền Trưởng phòng trong Tài khoản và Phân công KPI. Chưa đổi bất kỳ giá trị hoặc kích hoạt V2.';
+}
 function validateKpiRoutingSheets(){
   var ss=book_(),departments=managementRows_(ss),rows=kpiRows_(ss),active=activeEmailMap_(ss),errors=[];
   if(!ss.getSheetByName(SHEET_KPI_ASSIGNMENTS))return {ok:false,errors:['Chưa có tab Phân công KPI.']};
@@ -371,6 +399,10 @@ function validateKpiRoutingSheets(){
       errors.push('Phân công dòng '+(i+2)+': thiếu hoặc sai email, Phòng/Khu, chức vụ.');return;
     }
     if(!active[email]||!active[email].active)errors.push('Phân công dòng '+(i+2)+': email không thuộc tài khoản đang hoạt động.');
+    if(role==='DIRECTOR'&&active[email]&&active[email].role!=='DIRECTOR')
+      errors.push('Phân công dòng '+(i+2)+': vai trò Ban Giám đốc chưa được khai báo ở tab Tài khoản.');
+    if(isLeadershipUnit_(unit)&&role!=='DIRECTOR')
+      errors.push('Phân công dòng '+(i+2)+': đơn vị BGD chỉ dùng khai báo thành viên Ban Giám đốc.');
     var key=email+'::'+unit;if(assignments[key])errors.push('Phân công dòng '+(i+2)+': một người có nhiều chức vụ trong cùng Phòng/Khu.');
     assignments[key]=role;
   });
@@ -378,11 +410,17 @@ function validateKpiRoutingSheets(){
     var unit=String(d[0]||'').trim(),head=String(d[2]||'').trim().toLowerCase(),acting=String(d[5]||'').trim().toLowerCase(),director=String(d[6]||'').trim().toLowerCase();
     if(!unit||departmentsByKey[unit])errors.push('Phòng/Khu dòng '+(i+2)+': mã trùng hoặc trống.');
     departmentsByKey[unit]=true;
+    // BGD là đơn vị tổ chức lãnh đạo, không tạo vòng thông báo BGD -> BGD.
+    // Các ô C/D/E cũ giữ nguyên, riêng F/G không bắt buộc nhập và sẽ bị bỏ qua.
+    if(isLeadershipUnit_(unit))return;
     if(!!head===!!acting)errors.push('Phòng/Khu '+unit+': phải có đúng một Trưởng hoặc Quyền Trưởng phòng.');
     if(!director)errors.push('Phòng/Khu '+unit+': thiếu Ban Giám đốc phụ trách.');
     if(head&&assignments[head+'::'+unit]!=='MANAGER')errors.push('Phòng/Khu '+unit+': Trưởng phòng không có phân công hợp lệ.');
     if(acting&&assignments[acting+'::'+unit]!=='ACTING')errors.push('Phòng/Khu '+unit+': Quyền Trưởng phòng không có phân công hợp lệ.');
-    if(director&&assignments[director+'::'+unit]!=='DIRECTOR')errors.push('Phòng/Khu '+unit+': Ban Giám đốc chưa có phân công hợp lệ.');
+    if(director&&(!active[director]||!active[director].active||active[director].role!=='DIRECTOR'))
+      errors.push('Phòng/Khu '+unit+': cột G phải là email Ban Giám đốc đang hoạt động trong Tài khoản.');
+    if(director&&assignments[director+'::'+unit]!=='DIRECTOR')
+      errors.push('Phòng/Khu '+unit+': Ban Giám đốc chưa có phân công tương ứng trong tab Phân công KPI.');
     if((head||acting)===director)errors.push('Phòng/Khu '+unit+': người đứng đầu không được tự chấm chính mình.');
   });
   rows.forEach(function(r,i){var unit=String(r[1]||'').trim();if(!departmentsByKey[unit])errors.push('Phân công dòng '+(i+2)+': mã Phòng/Khu không tồn tại.');});

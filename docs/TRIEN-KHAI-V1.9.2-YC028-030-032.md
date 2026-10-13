@@ -1,5 +1,7 @@
 # HƯỚNG DẪN NÂNG CẤP NHẮC VIỆC KPI – TÂN HIỆP V1.9.2
 
+> **BẢN HOTFIX MỚI CHO CẤU HÌNH BGD:** Nếu đang sử dụng bộ mã **V1.9.2-HF1** (sau khi người dùng CHỐT lỗi nhóm BGD), đọc **`docs/HOTFIX-V1.9.2-HF1-BGD-TU-NHAP.md`** trước khi thao tác. Bản hotfix có **130/130** bài kiểm thử cục bộ, xử lý riêng mã `BGD` và thêm danh sách chọn chức vụ. Các bước bên dưới là hướng dẫn gốc V1.9.2 và không thay thế hướng dẫn hotfix.
+
 **Phạm vi:** YC-028 (phân quyền người chấm KPI theo từng Phòng/Khu và kiêm nhiệm), YC-030 (công việc KPI / cá nhân, **đã chọn phương án C**), YC-032 (đặt lịch và chuyển thông báo độc lập, xử lý tồn đọng cho khoảng 140 tài khoản).
 
 **Nền:** V1.9.1/YC-033. Không triển khai YC-027, YC-029, YC-031 trong bản này. Các hành vi cũ khác được giữ nguyên, nhưng vẫn cần kiểm thử thực tế.
