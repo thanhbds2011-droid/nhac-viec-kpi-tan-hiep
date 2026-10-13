@@ -396,3 +396,9 @@ footer{color:#97a8bf;font-size:10px}
 /* YC-033: native <dialog> fallback for Safari without showModal() (older iOS). */
 dialog.compat-dialog-open{display:block;position:fixed;z-index:1000;top:50%;left:50%;right:auto;bottom:auto;transform:translate(-50%,-50%);margin:0;max-height:calc(100vh - 40px);max-width:calc(100vw - 24px);overflow-y:auto;border:1px solid #dde6f5;box-shadow:0 0 0 100vmax rgba(12,35,75,.52),0 24px 80px rgba(12,35,75,.2)}
 @media(max-width:720px){dialog.compat-dialog-open{width:calc(100vw - 24px);max-width:calc(100vw - 24px)}}
+
+/* YC-028/030: keep field widths and touch controls consistent across platforms. */
+#taskType,#taskAssignment{width:100%;max-width:100%;min-height:44px;box-sizing:border-box}
+.field-helper{font-size:0.82rem;line-height:1.5;color:var(--muted,#667085);margin:5px 0 0}
+.task-type-label{font-size:0.75rem;font-weight:600;color:var(--muted,#667085)}
+.task-assignment-label{font-size:0.74rem;color:var(--muted,#667085)}

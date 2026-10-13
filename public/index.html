@@ -13,10 +13,10 @@
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
-  <link rel="stylesheet" href="/styles.css?v=1.9.1" />
+  <link rel="stylesheet" href="/styles.css?v=1.9.2" />
   <script defer src="https://accounts.google.com/gsi/client"></script>
   <script defer src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js"></script>
-  <script defer src="/app.js?v=1.9.1"></script>
+  <script defer src="/app.js?v=1.9.2"></script>
 </head>
 <body>
 <div class="shell">
@@ -67,6 +67,15 @@
           <form id="taskForm">
             <div class="field"><label for="taskTitle">Tên công việc <span class="req">*</span></label>
               <input id="taskTitle" type="text" maxlength="90" required placeholder="Ví dụ: Báo cáo quý IV" autocomplete="off" /></div>
+            <div class="field"><label for="taskType">Loại công việc</label>
+              <select id="taskType" aria-describedby="taskTypeHelp">
+                <option value="personal">Công việc cá nhân – chỉ nhắc cho tôi</option>
+                <option value="kpi">Công việc KPI – báo người quản lý khi hoàn thành</option>
+                <option value="legacy" hidden>Việc cũ – giữ cách xử lý trước đây</option>
+              </select><p id="taskTypeHelp" class="field-helper">Việc tự thêm mặc định là cá nhân. Công việc nhập từ iCPV được xếp loại KPI.</p></div>
+            <div class="field hide" id="assignmentField"><label for="taskAssignment">Phòng/Khu thực hiện công việc KPI</label>
+              <select id="taskAssignment"></select>
+              <p class="field-helper">Chỉ được chọn các Phòng/Khu, chức vụ đã được phân công.</p></div>
             <div class="date-time-fields">
               <div class="field"><label for="dueDate">Ngày đến hạn <span class="req">*</span></label>
                 <input id="dueDate" type="date" required /></div>
@@ -113,7 +122,7 @@
             <div><strong id="profileName">Viên chức</strong><p id="profileEmail"></p></div></div>
           <button type="button" class="menu-row" id="profileDefaultTime">⚙️ <span>Thay đổi giờ mặc định</span><span>›</span></button>
           <button type="button" id="adminShortcut" class="menu-row hide">📊 <span>Tổng quan quản trị</span><span>›</span></button>
-          <p class="profile-version">Phiên bản 1.9.1 · Nhắc việc KPI – Tân Hiệp</p>
+          <p class="profile-version">Phiên bản 1.9.2 · Nhắc việc KPI – Tân Hiệp</p>
           <button type="button" class="profile-signout" id="profileSignout">Đăng xuất</button>
           <p class="install-help" id="installHelp">iPhone: Trong Safari, chọn Chia sẻ → Thêm vào Màn hình chính. Android: chọn Cài đặt ứng dụng / Thêm vào Màn hình chính.</p>
         </section>

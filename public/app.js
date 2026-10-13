@@ -11,7 +11,7 @@ const $ = id => document.getElementById(id);
 const state = {
   config:null,credential:'',user:null,tasks:[],defaultTime:'07:30',editingId:null,
   onesignal:null,pushError:'',pushBoundAccount:'',busy:false,pushBusy:false,signingOut:false,sessionEpoch:0,filter:'all',
-  revision:0,inbox:[],deletedSourceKeys:[],isAdmin:false,managerConfigured:false,realtime:null,broadcast:null,localRevisionKey:'',realtimeEpoch:0,lastVersionCheck:0,queuedChanges:[],checkingVersion:false,sessionToken:'',reconcileAfterBusy:false
+  revision:0,inbox:[],deletedSourceKeys:[],isAdmin:false,managerConfigured:false,routingEnabled:false,assignments:[],realtime:null,broadcast:null,localRevisionKey:'',realtimeEpoch:0,lastVersionCheck:0,queuedChanges:[],checkingVersion:false,sessionToken:'',reconcileAfterBusy:false
 };
 let identityQueue=Promise.resolve();
 let activeMobilePane='list';
@@ -117,7 +117,12 @@ function renderTasks(){
     const day=document.createElement('span');day.className='date';day.textContent='▦ '+vnDate(t.dueDate);
     const time=document.createElement('span');time.className='time';time.textContent='◷ '+t.time;
     const st=taskStatus(t),badge=document.createElement('span');badge.className='pill '+st.cls;badge.textContent=st.label;
-    meta.append(day,time,badge);main.append(title,meta);
+    const type=document.createElement('span');type.className='task-type-label';
+    type.textContent=t.workType==='personal'?'Cá nhân':t.workType==='kpi'?'KPI':'Việc cũ';
+    meta.append(day,time,type,badge);main.append(title,meta);
+    if(t.assignmentKey){const assignment=state.assignments.find(a=>a.key===t.assignmentKey);
+      if(assignment){const tag=document.createElement('small');tag.className='task-assignment-label';
+        tag.textContent=assignment.unitName+' · '+assignment.label;main.append(tag);}}
     if(t.warning){const w=document.createElement('p');w.className='task-warning';w.textContent='⚠ '+t.warning;main.append(w);}
     const actions=document.createElement('div');actions.className='task-actions';
     actions.append(
@@ -138,6 +143,7 @@ function renderInbox(){
     const el=document.createElement('article');el.className='inbox-item';
     const title=document.createElement('strong');title.textContent=notice.from+' đã hoàn thành công việc';
     const body=document.createElement('p');body.textContent=notice.title;
+    if(notice.unitName){body.textContent=notice.title+' · '+notice.unitName;}
     const note=document.createElement('small');note.textContent='Vui lòng vào iCPV để xem xét, chấm điểm.';
     const del=makeButton('Xóa thông báo','Xóa thông báo đã xử lý',()=>void dismissNotification(notice.id),'small secondary');
     el.append(title,body,note,del);root.appendChild(el);
@@ -176,17 +182,51 @@ function renderSchedule(){
     box.append(card);
   }
 }
+function renderAssignmentOptions(selected=''){
+  const select=$('taskAssignment');select.replaceChildren();
+  const needs=$('taskType').value==='kpi'&&state.routingEnabled;
+  const multiple=state.assignments.length>1;
+  $('assignmentField').classList.toggle('hide',!needs||!multiple);
+  if(!needs)return;
+  if(multiple){const placeholder=document.createElement('option');placeholder.value='';placeholder.textContent='Chọn Phòng/Khu và chức vụ';select.append(placeholder);}
+  for(const a of state.assignments){const option=document.createElement('option');option.value=a.key;
+    option.textContent=a.unitName+' – '+a.label;select.append(option);}
+  select.value=selected||(!multiple&&state.assignments.length===1?state.assignments[0].key:'');
+}
+function selectedAssignment(){
+  return $('taskType').value==='kpi'&&state.routingEnabled?$('taskAssignment').value:'';
+}
+function appendImportAssignment(content,original){
+  if(!state.routingEnabled)return;
+  const selector=document.createElement('select');selector.className='import-assignment';
+  selector.setAttribute('aria-label','Phòng/Khu và chức vụ của nhiệm vụ KPI');
+  if(state.assignments.length!==1){const placeholder=document.createElement('option');placeholder.value='';
+    placeholder.textContent='Chọn Phòng/Khu của nhiệm vụ KPI';selector.append(placeholder);}
+  for(const a of state.assignments){const o=document.createElement('option');o.value=a.key;
+    o.textContent=a.unitName+' – '+a.label;selector.append(o);}
+  selector.value=original?.assignmentKey||((state.assignments.length===1)?state.assignments[0].key:'');
+  content.append(selector);
+}
 function edit(t){
   if(state.busy)return;
   state.editingId=t.id;$('taskTitle').value=t.title;$('dueDate').value=t.dueDate;
   $('dueDate').min=''; // Previously registered due dates are visible; server validates on save.
-  $('taskTime').value=t.time;$('formHeading').textContent='Sửa công việc';
+  $('taskTime').value=t.time;
+  $('taskType').querySelector('option[value=legacy]').hidden=(t.workType||'legacy')!=='legacy';
+  $('taskType').querySelector('option[value=personal]').disabled=!!t.sourceKey;
+  $('taskType').value=t.workType||'legacy';
+  renderAssignmentOptions(t.assignmentKey||'');
+  $('formHeading').textContent='Sửa công việc';
   $('saveTask').textContent='Cập nhật';$('cancelEdit').classList.remove('hide');
   showPane('create',true);preview();
 }
 function resetForm(){
   state.editingId=null;$('taskForm').reset();$('dueDate').min=nowVNDate();
-  $('taskTime').value=state.defaultTime;$('formHeading').textContent='Thêm công việc';
+  $('taskTime').value=state.defaultTime;
+  $('taskType').querySelector('option[value=legacy]').hidden=true;
+  $('taskType').querySelector('option[value=personal]').disabled=false;
+  $('taskType').value='personal';renderAssignmentOptions('');
+  $('formHeading').textContent='Thêm công việc';
   $('saveTask').textContent='Lưu công việc';$('cancelEdit').classList.add('hide');preview();
 }
 function paintData(){
@@ -201,6 +241,9 @@ function updateData(data){
   if(Array.isArray(data.deletedSourceKeys))state.deletedSourceKeys=data.deletedSourceKeys;
   if(typeof data.isAdmin==='boolean')state.isAdmin=data.isAdmin;
   if(typeof data.managerConfigured==='boolean')state.managerConfigured=data.managerConfigured;
+  if(typeof data.routingEnabled==='boolean')state.routingEnabled=data.routingEnabled;
+  if(Array.isArray(data.assignments))state.assignments=data.assignments;
+  if(!state.editingId)renderAssignmentOptions('');
   if(Number.isSafeInteger(data.revision))state.revision=data.revision;
   paintData();return true;
 }
@@ -375,11 +418,13 @@ async function optimisticMutation(action,data,change){
 async function saveTask(ev){
   ev.preventDefault();if(state.busy)return;
   const title=$('taskTitle').value.trim(),dueDate=$('dueDate').value,time=$('taskTime').value,id=state.editingId||'';
+  const workType=$('taskType').value,assignmentKey=selectedAssignment();
+  if(workType==='kpi'&&state.routingEnabled&&!assignmentKey){notify('Hãy chọn Phòng/Khu và chức vụ cho công việc KPI.',true);return;}
   if(!title||!dueDate||!time){notify('Hãy nhập tên, ngày đến hạn và giờ nhắc.',true);return;}
   const temporary=id||'pending-'+Date.now();
-  await optimisticMutation('save',{id,title,dueDate,time},()=>{
+  await optimisticMutation('save',{id,title,dueDate,time,workType,assignmentKey},()=>{
     state.tasks=state.tasks.filter(t=>t.id!==id);
-    state.tasks.push({id:temporary,title,dueDate,time,pending:4,warning:'',_optimistic:true});
+    state.tasks.push({id:temporary,title,dueDate,time,workType,assignmentKey,pending:4,warning:'',_optimistic:true});
   });
 }
 // YC-033: Safari below 15.4 has no native dialog API. Preserve the exact
@@ -429,7 +474,9 @@ function openTaskMenu(t){
 }
 async function remove(t){
   if(state.busy)return;
-  $('confirmText').textContent=state.managerConfigured?
+  $('confirmText').textContent=(t.workType==='legacy'&&state.routingEnabled)?
+    `“${t.title}” là công việc cũ chưa phân loại. Hãy sửa và chọn KPI hoặc Cá nhân trước khi xác nhận hoàn thành; vẫn có thể xóa nếu nhập nhầm.`:t.workType==='personal'?
+    `Bạn đã hoàn thành công việc cá nhân “${t.title}”? Không gửi thông báo chấm KPI.`:state.managerConfigured?
     `Bạn đã hoàn thành “${t.title}” trên iCPV? Trưởng phòng sẽ được thông báo để chấm điểm.`:
     `Bạn đã hoàn thành “${t.title}”? Chưa có thông tin Trưởng phòng nhận thông báo; hãy liên hệ quản trị viên.`;
   const dialog=$('confirmDialog');openAppDialog(dialog);
@@ -655,7 +702,7 @@ async function signout(){
   }catch(err){notify('Chưa thể ngắt OneSignal khỏi thiết bị. Hãy kiểm tra trạng thái thông báo trước khi dùng tài khoản khác.',true);}
   if(window.google?.accounts?.id)window.google.accounts.id.disableAutoSelect();
   window.postMessage({kind:'TAN_HIEP_ICPV_ACCOUNT_CONTEXT_V1',id:''},location.origin);
-  state.credential='';state.sessionToken='';state.user=null;state.tasks=[];state.inbox=[];state.deletedSourceKeys=[];state.isAdmin=false;state.managerConfigured=false;state.editingId=null;state.pushBoundAccount='';state.pushError='';
+  state.credential='';state.sessionToken='';state.user=null;state.tasks=[];state.inbox=[];state.deletedSourceKeys=[];state.isAdmin=false;state.managerConfigured=false;state.assignments=[];state.routingEnabled=false;state.editingId=null;state.pushBoundAccount='';state.pushError='';
   $('desktopAdminBtn').classList.add('hide');$('adminQuickPanel').classList.add('hide');
   $('headerNoticeBtn').classList.add('hide');$('headerProfileBtn').classList.add('hide');
   $('appView').classList.remove('is-admin','has-inbox');$('appView').classList.add('hide');$('signoutBtn').classList.add('hide');$('loginView').classList.remove('hide');
@@ -678,6 +725,7 @@ async function start(){
   $('tabCreate').addEventListener('click',()=>{resetForm();showPane('create',true);});
   $('taskForm').addEventListener('submit',saveTask);
   $('dueDate').addEventListener('change',preview);$('taskTime').addEventListener('change',preview);
+  $('taskType').addEventListener('change',()=>renderAssignmentOptions(''));
   $('cancelEdit').addEventListener('click',()=>{resetForm();showPane('list',true);});
   $('backToList').addEventListener('click',()=>{resetForm();showPane('list',true);});
   $('formCancel').addEventListener('click',()=>{resetForm();showPane('list',true);});
@@ -752,6 +800,9 @@ function receiveImportFromExtension(event){
   const known=new Map(state.tasks.filter(t=>t.sourceKey).map(t=>[t.sourceKey,t]));
   const deleted=new Set(state.deletedSourceKeys);
   const active=[...state.tasks].sort((a,b)=>a.title.localeCompare(b.title,'vi'));
+  if(state.routingEnabled&&!state.assignments.length){
+    notify('Tài khoản chưa có phân công Phòng/Khu hợp lệ để nhập nhiệm vụ KPI.',true);return;
+  }
   let initialAdd=0,checkCount=0;
   for(let i=0;i<clean.length;i++){
     const t=clean[i],matched=known.get(t.sourceKey),wasDeleted=deleted.has(t.sourceKey);
@@ -785,7 +836,8 @@ function receiveImportFromExtension(event){
     if(matched)target.value=matched.id;
     function refreshAction(){target.classList.toggle('hide',actionSelect.value!=='update');}
     actionSelect.addEventListener('change',refreshAction);refreshAction();
-    content.append(info,title,due,actionSelect,target);row.append(content);list.append(row);
+    content.append(info,title,due,actionSelect,target);
+    appendImportAssignment(content,matched||null);row.append(content);list.append(row);
   }
   $('importInfo').textContent='Đã đọc '+clean.length+' nhiệm vụ trên trang iCPV đang mở. '+initialAdd+
     ' mục đề xuất thêm; '+checkCount+' mục cần rà soát. Bạn tự quyết định cập nhật, thêm mới hoặc bỏ qua. Các công việc cũ không tự thay đổi.';
@@ -804,7 +856,9 @@ async function confirmImport(){
     if(!title||!dueDate){notify('Hãy kiểm tra tên và ngày đến hạn của công việc được chọn.',true);return;}
     const targetId=row.querySelector('.target-select').value;
     if(kind==='update'&&!targetId){notify('Hãy chọn công việc đang theo dõi để cập nhật.',true);return;}
-    decisions.push({sourceKey:original.sourceKey,title,dueDate,kind,targetId:kind==='update'?targetId:''});
+    const assignmentKey=row.querySelector('.import-assignment')?.value||'';
+    if(state.routingEnabled&&!assignmentKey){notify('Hãy chọn Phòng/Khu và chức vụ cho từng nhiệm vụ KPI.',true);return;}
+    decisions.push({sourceKey:original.sourceKey,title,dueDate,kind,targetId:kind==='update'?targetId:'',assignmentKey});
   }
   if(!decisions.length){closeAppDialog($('importDialog'));pendingImport=null;notify('Đã giữ nguyên công việc hiện có.');return;}
   const button=$('importApply');button.disabled=true;

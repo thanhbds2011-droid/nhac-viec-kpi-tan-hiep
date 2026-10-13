@@ -9,6 +9,9 @@ var SHEET_ACCESS='Access'; // Bản gốc giữ lại để sao lưu và quay l�
 var SHEET_USERS='Tài khoản';
 var SHEET_DEPARTMENTS='Quản lý Phòng-Khu'; // Không dùng dấu / trong tên tab.
 var SHEET_STATE='State';
+var SHEET_KPI_ASSIGNMENTS='Phân công KPI';
+var KPI_ROUTING_KEY='KPI_ROUTING_SCHEMA'; // V2 only after explicit admin validation/activation
+
 var ACCOUNT_SCHEMA_KEY='ACCOUNT_SCHEMA'; // LEGACY / VI; mặc định LEGACY.
 var VN_ZONE='Asia/Ho_Chi_Minh';
 var DAYS_AHEAD=7;
@@ -117,13 +120,13 @@ function adminPermission_(flag,role){
 function accountIsAdmin_(info){return typeof info.isAdmin==='boolean'?info.isAdmin:isAdmin_(info.role);}
 function roleLabel_(role){
   var kind=roleKind_(role);
-  return kind==='MANAGER'?'Trưởng phòng/Khu':kind==='VICE'?'Phó Trưởng phòng/Khu':kind==='ADMIN'?'Quản trị viên':kind==='EMPLOYEE'?'Nhân viên':String(role||'');
+  return kind==='DIRECTOR'?'Ban Giám đốc':kind==='ACTING'?'Quyền Trưởng phòng/Khu':kind==='MANAGER'?'Trưởng phòng/Khu':kind==='VICE'?'Phó Trưởng phòng/Khu':kind==='ADMIN'?'Quản trị viên':kind==='EMPLOYEE'?'Nhân viên':String(role||'');
 }
 function validateVietnameseAdminSheets(){
   var ss=book_(),u=ss.getSheetByName(SHEET_USERS),d=ss.getSheetByName(SHEET_DEPARTMENTS),problems=[];
   if(!u||!d)return {ok:false,errors:['Thiếu tab Tài khoản hoặc Quản lý Phòng-Khu. Chạy hàm chuẩn bị trước.']};
   var users=u.getLastRow()>1?u.getRange(2,1,u.getLastRow()-1,7).getDisplayValues():[];
-  var units=d.getLastRow()>1?d.getRange(2,1,d.getLastRow()-1,5).getDisplayValues():[];
+  var units=d.getLastRow()>1?d.getRange(2,1,d.getLastRow()-1,7).getDisplayValues():[];
   var emailPattern=/^[^\s@]+@[^\s@]+\.[^\s@]+$/,byEmail={},byUnit={};
   users.forEach(function(r,i){
     if(!r.some(function(v){return String(v).trim();}))return;
@@ -136,7 +139,7 @@ function validateVietnameseAdminSheets(){
       problems.push('Tài khoản dòng '+(i+2)+': quyền quản trị chỉ nhận Có hoặc Không.');
     if(['HOAT DONG','NGUNG HOAT DONG'].indexOf(textKey_(r[2]))===-1)
       problems.push('Tài khoản dòng '+(i+2)+': trạng thái phải là Hoạt động hoặc Ngừng hoạt động.');
-    if(enabled_(r[2])&&kind!=='ADMIN'&&!String(r[4]||'').trim())
+    if(enabled_(r[2])&&kind!=='ADMIN'&&kind!=='DIRECTOR'&&!String(r[4]||'').trim())
       problems.push('Tài khoản dòng '+(i+2)+': chưa chọn mã Phòng/Khu.');
   });
   units.forEach(function(r,i){
@@ -146,7 +149,11 @@ function validateVietnameseAdminSheets(){
     if(byUnit[key])problems.push('Phòng/Khu dòng '+(i+2)+': mã Phòng/Khu bị trùng.');
     byUnit[key]=true;
     var m=byEmail[manager];
-    if(!m||!m.active||m.role!=='MANAGER'||m.unit!==key)
+    if(routingV2_()&&!manager){
+      var acting=String(r[5]||'').trim().toLowerCase();
+      var deputyHead=byEmail[acting];
+      if(!acting||!deputyHead||!deputyHead.active)problems.push('Phòng/Khu '+key+': Quyền Trưởng phòng chưa hợp lệ.');
+    }else if(!m||!m.active||m.role!=='MANAGER'||m.unit!==key)
       problems.push('Phòng/Khu '+(key||i+2)+': email Trưởng phòng không hợp lệ, chưa kích hoạt hoặc sai đơn vị/vai trò.');
     [3,4].forEach(function(j){
       var deputy=String(r[j]||'').trim().toLowerCase();if(!deputy)return;
@@ -159,7 +166,7 @@ function validateVietnameseAdminSheets(){
   });
   Object.keys(byEmail).forEach(function(email){
     var a=byEmail[email];
-    if(a.active&&a.role!=='ADMIN'&&!byUnit[a.unit])problems.push('Tài khoản '+email+': mã Phòng/Khu không tồn tại.');
+    if(a.active&&a.role!=='ADMIN'&&a.role!=='DIRECTOR'&&!byUnit[a.unit])problems.push('Tài khoản '+email+': mã Phòng/Khu không tồn tại.');
   });
   if(!users.length||!units.length)problems.push('Chưa nhập đủ danh sách tài khoản hoặc Phòng/Khu.');
   return {ok:problems.length===0,errors:problems,accounts:Object.keys(byEmail).length,units:Object.keys(byUnit).length};
@@ -203,7 +210,11 @@ function onOpen(){
     .addItem('2. Kiểm tra phân quyền','inspectVietnameseAdminSheets')
     .addItem('3. Kích hoạt phân quyền','activateVietnameseAdminSheets')
     .addItem('4. Quay lại Access cũ','rollbackVietnameseAdminSheets')
-    .addItem('5. Bổ sung cột quyền quản trị','prepareAdminPermissionColumn').addToUi();}catch(_e){}
+    .addItem('5. Bổ sung cột quyền quản trị','prepareAdminPermissionColumn')
+    .addSeparator().addItem('6. Chuẩn bị phân công KPI','prepareKpiRoutingSheets')
+    .addItem('7. Kiểm tra phân công KPI','inspectKpiRoutingSheets')
+    .addItem('8. Kích hoạt phân công KPI','activateKpiRoutingSheets')
+    .addItem('9. Tắt phân công KPI V2','rollbackKpiRoutingSheets').addToUi();}catch(_e){}
 }
 
 function jsonOutput_(o){return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON);}
@@ -240,6 +251,8 @@ function enabled_(s){return ['YES','TRUE','1','CO','ACTIVE','HOAT DONG'].indexOf
 function roleKind_(role){
   var r=textKey_(role);
   if(['ADMIN','ADMINISTRATOR','QUAN TRI','QUAN TRI VIEN'].indexOf(r)!==-1)return 'ADMIN';
+  if(['BAN GIAM DOC','GIAM DOC','PHO GIAM DOC','DIRECTOR'].indexOf(r)!==-1)return 'DIRECTOR';
+  if(['QUYEN TRUONG PHONG','QUYEN TRUONG KHU','QUYEN TRUONG PHONG KHU','ACTING_MANAGER'].indexOf(r)!==-1)return 'ACTING';
   if(['VICE_MANAGER','DEPUTY_MANAGER','PHO TRUONG PHONG','PHO TRUONG KHU','PHO TRUONG PHONG KHU','PHO PHONG','PHO KHU'].indexOf(r)!==-1)return 'VICE';
   if(['MANAGER','LEADER','HEAD','LANH DAO','TRUONG PHONG','TRUONG KHU','TRUONG PHONG KHU'].indexOf(r)!==-1)return 'MANAGER';
   if(['EMPLOYEE','USER','NHAN VIEN'].indexOf(r)!==-1)return 'EMPLOYEE';
@@ -248,7 +261,153 @@ function roleKind_(role){
 function isVietnameseSchema_(){return prop_(ACCOUNT_SCHEMA_KEY)==='VI';}
 function managementRows_(ss){
   var sh=ss.getSheetByName(SHEET_DEPARTMENTS);
-  return sh&&sh.getLastRow()>1?sh.getRange(2,1,sh.getLastRow()-1,5).getDisplayValues():[];
+  return sh&&sh.getLastRow()>1?sh.getRange(2,1,sh.getLastRow()-1,7).getDisplayValues():[];
+}
+/** YC-028: This schema is dormant until the administrator explicitly activates it. */
+function routingV2_(){
+  if(typeof PropertiesService==='undefined')return false; // Old VM fixtures have no Script Properties.
+  return isVietnameseSchema_()&&prop_(KPI_ROUTING_KEY)==='V2';
+}
+function kpiAssignmentKey_(unit,role){return String(unit||'').trim()+'::'+String(role||'').trim();}
+function kpiRows_(ss){
+  var sh=ss.getSheetByName(SHEET_KPI_ASSIGNMENTS);
+  return sh&&sh.getLastRow()>1?sh.getRange(2,1,sh.getLastRow()-1,3).getDisplayValues():[];
+}
+function assignmentCatalog_(ss){
+  if(!routingV2_())return null;
+  var departments={},emailAssignments={};
+  managementRows_(ss).forEach(function(r){
+    var unit=String(r[0]||'').trim();if(!unit)return;
+    if(departments[unit]){departments[unit].invalid=true;return;}
+    departments[unit]={unit:unit,name:String(r[1]||unit),head:String(r[2]||'').trim().toLowerCase(),
+      acting:String(r[5]||'').trim().toLowerCase(),director:String(r[6]||'').trim().toLowerCase()};
+  });
+  kpiRows_(ss).forEach(function(r){
+    var email=String(r[0]||'').trim().toLowerCase(),unit=String(r[1]||'').trim(),role=roleKind_(r[2]);
+    if(!email||!unit||!role)return;
+    if(!emailAssignments[email])emailAssignments[email]=[];
+    emailAssignments[email].push({key:kpiAssignmentKey_(unit,role),unit:unit,role:role,
+      label:roleLabel_(r[2]),unitName:departments[unit]?departments[unit].name:unit});
+  });
+  return {departments:departments,assignments:emailAssignments};
+}
+function activeEmailMap_(ss){
+  var map={};accessRows_(ss).forEach(function(r){
+    var email=String(r[0]||'').trim().toLowerCase();
+    if(!email)return;
+    if(map[email])map[email].active=false; // ambiguous duplicate fails closed
+    else map[email]={active:enabled_(r[2]),name:String(r[1]||'').trim(),role:roleKind_(r[3]),unit:String(r[5]||'').trim()};
+  });
+  return map;
+}
+function approvedRecipient_(ss,email){
+  var normalized=String(email||'').trim().toLowerCase();if(!normalized)return false;
+  if(!routingV2_())return !!findActiveManager_(ss,normalized);
+  var active=activeEmailMap_(ss);if(!active[normalized]||!active[normalized].active)return false;
+  var catalog=assignmentCatalog_(ss);
+  return Object.keys(catalog.departments).some(function(unit){
+    var d=catalog.departments[unit];return !d.invalid&&!(d.head&&d.acting)&&(d.head===normalized||d.acting===normalized||d.director===normalized);
+  });
+}
+function routingRecipient_(ss,sourceEmail,assignmentKey,catalog,active){
+  var list=(catalog&&catalog.assignments[String(sourceEmail||'').toLowerCase()])||[];
+  var assigned=list.filter(function(a){return a.key===assignmentKey;});
+  if(assigned.length!==1)return null;
+  var a=assigned[0],dept=catalog.departments[a.unit];
+  if(!dept||dept.invalid||(dept.head&&dept.acting)||(!dept.head&&!dept.acting))return null;
+  var recipient=['EMPLOYEE','VICE'].indexOf(a.role)!==-1?(dept.acting||dept.head):
+    ['MANAGER','ACTING'].indexOf(a.role)!==-1?dept.director:'';
+  if(!recipient||recipient===String(sourceEmail||'').toLowerCase()||!active[recipient]||!active[recipient].active)return null;
+  var destList=catalog.assignments[recipient]||[];
+  var wantRole=['EMPLOYEE','VICE'].indexOf(a.role)!==-1?(dept.acting?'ACTING':'MANAGER'):'DIRECTOR';
+  if(!destList.some(function(x){return x.unit===a.unit&&x.role===wantRole;}))return null;
+  return {email:recipient,name:active[recipient].name,unit:a.unit,unitName:dept.name,role:a.role};
+}
+function routeForTask_(ss,info,task,catalog,active){
+  if(routingV2_())return routingRecipient_(ss,info.email,task.assignmentKey,catalog||assignmentCatalog_(ss),active||activeEmailMap_(ss));
+  if(task.assignmentKey)return null; // Fail closed after rolling V2 back; never reroute a V2 task to legacy manager.
+  if(isManagerRole_(info.role)||!info.managerEmail)return null;
+  var old=findActiveManager_(ss,info.managerEmail);
+  return old?{email:old.email,name:old.name,unit:info.unit,unitName:info.unit,role:roleKind_(info.role)}:null;
+}
+function assignmentForSave_(info,key,type,existing){
+  if(type!=='kpi')return '';
+  var assignments=info.assignments||[];
+  if(!routingV2_())return existing&&existing.assignmentKey?existing.assignmentKey:''; // Keep V2 context during rollback; never misroute.
+  if(existing&&existing.assignmentKey&&!key)key=existing.assignmentKey;
+  if(!key&&assignments.length===1)key=assignments[0].key;
+  if(!key||!assignments.some(function(a){return a.key===key;}))
+    throw fail_('BAD_REQUEST','Hãy chọn Phòng/Khu và chức vụ hợp lệ cho công việc KPI.');
+  return key;
+}
+/** Administrator runs manually. Does not touch account or task data or activate itself. */
+function prepareKpiRoutingSheets(){
+  if(!isVietnameseSchema_())throw new Error('Cần kích hoạt bảng Tài khoản tiếng Việt trước.');
+  if(routingV2_())throw new Error('Cơ chế phân quyền mới đã kích hoạt.');
+  var ss=book_(),d=ss.getSheetByName(SHEET_DEPARTMENTS),u=ss.getSheetByName(SHEET_USERS);
+  if(!d||!u)throw new Error('Thiếu Tài khoản hoặc Quản lý Phòng-Khu.');
+  var f=String(d.getRange(1,6).getDisplayValue()||''),g=String(d.getRange(1,7).getDisplayValue()||'');
+  if((f&&f!=='Email Quyền Trưởng phòng/Khu')||(g&&g!=='Email Ban Giám đốc phụ trách'))
+    throw new Error('Cột F/G đã có thông tin khác, không ghi đè.');
+  if(ss.getSheetByName(SHEET_KPI_ASSIGNMENTS))throw new Error('Đã có bảng Phân công KPI; không tạo đè.');
+  d.getRange(1,6,1,2).setValues([['Email Quyền Trưởng phòng/Khu','Email Ban Giám đốc phụ trách']]);
+  var a=ss.insertSheet(SHEET_KPI_ASSIGNMENTS);
+  a.getRange(1,1,1,3).setValues([['Email đăng nhập','Mã Phòng/Khu','Chức vụ tại Phòng/Khu']]);
+  var rows=u.getLastRow()>1?u.getRange(2,1,u.getLastRow()-1,7).getDisplayValues():[];
+  var initial=rows.filter(function(r){return r[0]&&r[4]&&enabled_(r[2])&&roleKind_(r[3])!=='ADMIN';}).map(function(r){return [r[0],r[4],roleLabel_(r[3])];});
+  if(initial.length)a.getRange(2,1,initial.length,3).setValues(initial);
+  configureAdminView_(a,[280,175,260]);
+  SpreadsheetApp.flush();
+  return 'Đã chuẩn bị Phân công KPI và cột F/G của Quản lý Phòng-Khu, chưa kích hoạt. Hãy điền Ban Giám đốc và kiểm tra trước.';
+}
+function validateKpiRoutingSheets(){
+  var ss=book_(),departments=managementRows_(ss),rows=kpiRows_(ss),active=activeEmailMap_(ss),errors=[];
+  if(!ss.getSheetByName(SHEET_KPI_ASSIGNMENTS))return {ok:false,errors:['Chưa có tab Phân công KPI.']};
+  if(!departments.length||!rows.length)errors.push('Thiếu Phòng/Khu hoặc phân công chức vụ.');
+  var assignments={},departmentsByKey={};
+  rows.forEach(function(r,i){
+    var email=String(r[0]||'').trim().toLowerCase(),unit=String(r[1]||'').trim(),role=roleKind_(r[2]);
+    if(!email||!unit||!['EMPLOYEE','VICE','MANAGER','ACTING','DIRECTOR'].includes(role)){
+      errors.push('Phân công dòng '+(i+2)+': thiếu hoặc sai email, Phòng/Khu, chức vụ.');return;
+    }
+    if(!active[email]||!active[email].active)errors.push('Phân công dòng '+(i+2)+': email không thuộc tài khoản đang hoạt động.');
+    var key=email+'::'+unit;if(assignments[key])errors.push('Phân công dòng '+(i+2)+': một người có nhiều chức vụ trong cùng Phòng/Khu.');
+    assignments[key]=role;
+  });
+  departments.forEach(function(d,i){
+    var unit=String(d[0]||'').trim(),head=String(d[2]||'').trim().toLowerCase(),acting=String(d[5]||'').trim().toLowerCase(),director=String(d[6]||'').trim().toLowerCase();
+    if(!unit||departmentsByKey[unit])errors.push('Phòng/Khu dòng '+(i+2)+': mã trùng hoặc trống.');
+    departmentsByKey[unit]=true;
+    if(!!head===!!acting)errors.push('Phòng/Khu '+unit+': phải có đúng một Trưởng hoặc Quyền Trưởng phòng.');
+    if(!director)errors.push('Phòng/Khu '+unit+': thiếu Ban Giám đốc phụ trách.');
+    if(head&&assignments[head+'::'+unit]!=='MANAGER')errors.push('Phòng/Khu '+unit+': Trưởng phòng không có phân công hợp lệ.');
+    if(acting&&assignments[acting+'::'+unit]!=='ACTING')errors.push('Phòng/Khu '+unit+': Quyền Trưởng phòng không có phân công hợp lệ.');
+    if(director&&assignments[director+'::'+unit]!=='DIRECTOR')errors.push('Phòng/Khu '+unit+': Ban Giám đốc chưa có phân công hợp lệ.');
+    if((head||acting)===director)errors.push('Phòng/Khu '+unit+': người đứng đầu không được tự chấm chính mình.');
+  });
+  rows.forEach(function(r,i){var unit=String(r[1]||'').trim();if(!departmentsByKey[unit])errors.push('Phân công dòng '+(i+2)+': mã Phòng/Khu không tồn tại.');});
+  return {ok:!errors.length,errors:errors,assignments:rows.length,departments:departments.length};
+}
+function inspectKpiRoutingSheets(){
+  var validation=validateKpiRoutingSheets();
+  var message=validation.ok?'Hợp lệ: '+validation.assignments+' phân công, '+validation.departments+' Phòng/Khu.':
+    'Có '+validation.errors.length+' vấn đề cần xử lý:\n'+validation.errors.join('\n');
+  Logger.log(message);
+  try{SpreadsheetApp.getUi().alert('Kiểm tra phân công KPI',message,SpreadsheetApp.getUi().ButtonSet.OK);}catch(_ignored){}
+  return validation;
+}
+function activateKpiRoutingSheets(){
+  return withLock_(function(){
+    if(!isVietnameseSchema_())throw new Error('Chưa sử dụng tab Tài khoản tiếng Việt.');
+    var result=validateKpiRoutingSheets();
+    if(!result.ok)throw new Error('Chưa thể kích hoạt: '+result.errors.slice(0,12).join(' | '));
+    PropertiesService.getScriptProperties().setProperty(KPI_ROUTING_KEY,'V2');
+    return 'Đã kích hoạt phân công KPI V2. Không thay đổi dữ liệu công việc cũ.';
+  });
+}
+function rollbackKpiRoutingSheets(){
+  return withLock_(function(){PropertiesService.getScriptProperties().deleteProperty(KPI_ROUTING_KEY);
+    return 'Đã tắt định tuyến KPI V2. Bảng phân công và State vẫn được giữ nguyên.';});
 }
 function accessRows_(ss){
   var vietnamese=isVietnameseSchema_(),sh=ss.getSheetByName(vietnamese?SHEET_USERS:SHEET_ACCESS);
@@ -285,7 +444,8 @@ function checkAccess_(ss,actor){
   for(var i=0;i<entries.length;i++){
     if(String(entries[i][0]).trim().toLowerCase()!==email)continue;
     if(!enabled_(entries[i][2]))throw fail_('FORBIDDEN','Tài khoản chưa được kích hoạt hoặc đã bị thu hồi quyền.');
-    return {email:email,name:String(entries[i][1]).trim()||String(actor.name||'').slice(0,80)||email,role:String(entries[i][3]||'').trim(),managerEmail:String(entries[i][4]||'').trim().toLowerCase(),unit:String(entries[i][5]||'').trim(),isAdmin:adminPermission_(entries[i][6],entries[i][3])};
+    var catalog=assignmentCatalog_(ss);
+    return {email:email,name:String(entries[i][1]).trim()||String(actor.name||'').slice(0,80)||email,role:String(entries[i][3]||'').trim(),managerEmail:String(entries[i][4]||'').trim().toLowerCase(),unit:String(entries[i][5]||'').trim(),isAdmin:adminPermission_(entries[i][6],entries[i][3]),assignments:catalog?(catalog.assignments[email]||[]):[],routingEnabled:!!catalog};
   }
   throw fail_('FORBIDDEN','Tài khoản Google này chưa có trong danh sách Access.');
 }
@@ -332,12 +492,13 @@ function vnToday_(){return Utilities.formatDate(new Date(),VN_ZONE,'yyyy-MM-dd')
 function vnDay_(s){return s.slice(8,10)+'/'+s.slice(5,7)+'/'+s.slice(0,4);}
 function publicView_(profile,info,ext){
   var now=Date.now(),horizon=now+DAYS_AHEAD*DAY_MS;
-  return {email:info.email,name:info.name,externalId:ext,defaultTime:profile.defaultTime,revision:profile.revision,isAdmin:accountIsAdmin_(info),managerConfigured:!!info.managerEmail&&!isManagerRole_(info.role),
+  return {email:info.email,name:info.name,externalId:ext,defaultTime:profile.defaultTime,revision:profile.revision,isAdmin:accountIsAdmin_(info),managerConfigured:!!info.managerEmail&&!isManagerRole_(info.role)||!!info.routingEnabled,
+    routingEnabled:!!info.routingEnabled,assignments:info.assignments||[],
     deletedSourceKeys:profile.deletedSourceKeys,
-    inbox:profile.inbox.filter(function(n){return !n.dismissed;}).map(function(n){return {id:n.id,from:n.from,title:n.title,at:n.at};}),
+    inbox:profile.inbox.filter(function(n){return !n.dismissed;}).map(function(n){return {id:n.id,from:n.from,title:n.title,at:n.at,unit:n.unit||'',unitName:n.unitName||''};}),
     tasks:profile.tasks.filter(function(t){return !t.deleted;}).map(function(t){
       var pending=(t.slots||[]).filter(function(s){return !s.id&&s.at>now&&s.at<=horizon;}).length;
-      return {id:t.id,title:t.title,dueDate:t.dueDate,time:t.time,sourceKey:t.sourceKey||'',pending:pending,
+      return {id:t.id,title:t.title,dueDate:t.dueDate,time:t.time,sourceKey:t.sourceKey||'',workType:t.workType||'legacy',assignmentKey:t.assignmentKey||'',pending:pending,
         warning:profile.cancellations.length?'Một số lịch cũ đang chờ hủy.':(t.lastError||'')};
     })};
 }
@@ -377,31 +538,68 @@ function stateRowByEmail_(sh,email){
 }
 // Called under script lock. Source outbox is saved BEFORE any cross-account operation;
 // idempotent manager inbox insertion prevents duplicates after uncertain writes.
+/** Deliver an individual completion in O(one source + one target) Sheets rows. */
+function deliverSingleCompletion_(ss,sourceRow,sourceEmail,completionId,recipientEmail){
+  if(!recipientEmail||!approvedRecipient_(ss,recipientEmail))return false;
+  var sh=stateSheet_(ss),recipientRow=stateRowByEmail_(sh,recipientEmail);
+  if(!recipientRow)return false; // Await manager's first authenticated login.
+  var sender=normalizeState_(JSON.parse(String(sh.getRange(sourceRow,3).getValue())));
+  var event=sender.completionOutbox.find(function(x){return x.id===completionId;});
+  if(!event)return false;
+  if(routingV2_()){
+    var current=routingRecipient_(ss,sourceEmail,event.assignmentKey,assignmentCatalog_(ss),activeEmailMap_(ss));
+    if(!current||current.email!==recipientEmail)return false;
+  }else if(!findActiveManager_(ss,recipientEmail))return false;
+  var raw=sh.getRange(recipientRow,3).getValue();
+  var recipient=normalizeState_(raw?JSON.parse(String(raw)):newState_());
+  if(!recipient.inbox.some(function(x){return x.id===completionId;})){
+    recipient.inbox.push({id:event.id,from:event.from,title:event.title,at:event.at,
+      unit:event.unit||'',unitName:event.unitName||'',pushSent:false,nextRetryAt:0});
+    bumpRevision_(recipient);saveState_(sh,recipientRow,recipient,recipientEmail);
+  }
+  sender.completionOutbox=sender.completionOutbox.filter(function(x){return x.id!==completionId;});
+  saveState_(sh,sourceRow,sender,sourceEmail);
+  return true;
+}
 function deliverOutbox_(ss,managerEmail){
-  if(!managerEmail||!findActiveManager_(ss,managerEmail))return false;
+  managerEmail=String(managerEmail||'').toLowerCase();
+  if(!managerEmail||!approvedRecipient_(ss,managerEmail))return false;
   var sh=stateSheet_(ss),targetRow=stateRowByEmail_(sh,managerEmail);if(!targetRow)return false;
   var raw=sh.getRange(targetRow,3).getValue(),recipient=normalizeState_(raw?JSON.parse(String(raw)):newState_());
-  var last=sh.getLastRow(),rows=sh.getRange(2,2,last-1,2).getValues(),inboxDirty=false,delivered=false,access=accessRows_(ss);
+  var last=sh.getLastRow(),rows=sh.getRange(2,2,last-1,2).getValues(),delivered=false;
+  var access=accessRows_(ss),catalog=assignmentCatalog_(ss),active=catalog?activeEmailMap_(ss):null;
   for(var i=0;i<rows.length;i++){
     var row=i+2,sourceEmail=String(rows[i][0]||'').trim().toLowerCase();
     if(sourceEmail===managerEmail||!rows[i][1])continue;
-    // Always enforce the CURRENT administrator-approved relationship at delivery time.
     var sourceAccess=access.find(function(a){return String(a[0]||'').trim().toLowerCase()===sourceEmail&&enabled_(a[2]);});
-    if(!sourceAccess||String(sourceAccess[4]||'').trim().toLowerCase()!==managerEmail)continue;
+    if(!sourceAccess)continue;
     var source;
     try{source=normalizeState_(JSON.parse(String(rows[i][1])));}catch(err){continue;}
-    var pending=source.completionOutbox; // Pending events follow the current approved manager if reassigned.
-    if(!pending.length)continue;
-    pending.forEach(function(e){
-      if(!recipient.inbox.some(function(m){return m.id===e.id;})){
-        recipient.inbox.push({id:e.id,from:e.from,title:e.title,at:e.at,pushSent:false,nextRetryAt:0});inboxDirty=true;
+    if(!source.completionOutbox.length)continue;
+    var transferred={},recipientDirty=false;
+    source.completionOutbox.forEach(function(e){
+      var target='';
+      if(catalog&&e.assignmentKey){
+        var route=routingRecipient_(ss,sourceEmail,e.assignmentKey,catalog,active);
+        target=route?route.email:'';
+      }else if(e.assignmentKey||catalog&&e.routePending){
+        target=''; // Never route V2 events through Access after rollback.
+      }else{
+        // Legacy events keep their original Access-based routing semantics.
+        target=String(sourceAccess[4]||'').trim().toLowerCase();
       }
+      if(target!==managerEmail)return;
+      if(!recipient.inbox.some(function(m){return m.id===e.id;})){
+        recipient.inbox.push({id:e.id,from:e.from,title:e.title,at:e.at,unit:e.unit||'',unitName:e.unitName||'',pushSent:false,nextRetryAt:0});
+        delivered=true;recipientDirty=true;
+      }
+      transferred[e.id]=true;
     });
-    if(inboxDirty){bumpRevision_(recipient);saveState_(sh,targetRow,recipient,managerEmail);inboxDirty=false;delivered=true;}
-    // Re-read current State within the lock; never overwrite other in-flight edits.
-    var transferred={};pending.forEach(function(e){transferred[e.id]=true;});
-    source.completionOutbox=source.completionOutbox.filter(function(e){return !transferred[e.id];});
-    saveState_(sh,row,source,sourceEmail);
+    if(Object.keys(transferred).length){
+      if(recipientDirty){bumpRevision_(recipient);saveState_(sh,targetRow,recipient,managerEmail);}
+      source.completionOutbox=source.completionOutbox.filter(function(e){return !transferred[e.id];});
+      saveState_(sh,row,source,sourceEmail);
+    }
   }
   return delivered;
 }
@@ -432,7 +630,7 @@ function runAction_(req){
     if(dirty)saveState_(sh,item.row,p,info.email);
     var deliveredForManager=false;
     // First manager login creates their State row; deliver queued events on subsequent loads too.
-    if(roleKind_(info.role)==='MANAGER'&&accessRows_(ss).some(function(r){return String(r[4]||'').trim().toLowerCase()===info.email&&String(r[0]||'').trim().toLowerCase()!==info.email;})){
+    if(approvedRecipient_(ss,info.email)){
       try{deliveredForManager=deliverOutbox_(ss,info.email);var updated=readState_(ss,req.actor,false);if(updated)p=updated.profile;}
       catch(err){console.error('Deliver inbox:',err.message||err);}
     }
@@ -455,16 +653,23 @@ function runAction_(req){
     if(dateMs_(due,time,0)>Date.now()+3*366*DAY_MS)throw fail_('BAD_REQUEST','Chỉ được đăng ký tối đa 3 năm trong tương lai.');
     requireRevision_(d,p);
     var existing=d.id?p.tasks.find(function(t){return t.id===d.id&&!t.deleted;}):null;
+    var requestedType=String(d.workType||'');
+    var type=existing&&(!requestedType||requestedType==='legacy')?(existing.workType||'legacy'):(requestedType||'legacy');
+    if(['personal','kpi','legacy'].indexOf(type)===-1)
+      throw fail_('BAD_REQUEST','Loại công việc không hợp lệ.');
+    if(existing&&existing.source==='icpv'&&type==='personal')throw fail_('BAD_REQUEST','Không thể chuyển nhiệm vụ iCPV sang công việc cá nhân.');
+    var assignmentKey=assignmentForSave_(info,d.assignmentKey||'',type,existing);
     if(d.id&&!existing)throw fail_('BAD_REQUEST','Không tìm thấy công việc cần sửa.');
     if(!existing&&p.tasks.filter(function(t){return !t.deleted&&t.dueDate>=vnToday_();}).length>=MAX_ACTIVE)
       throw fail_('BAD_REQUEST','Tài khoản đang có quá nhiều lịch nhắc (50). Hãy xóa những lịch không cần thiết.');
-    if(existing&&existing.title===title&&existing.dueDate===due&&existing.time===time){
+    if(existing&&existing.title===title&&existing.dueDate===due&&existing.time===time&&(existing.workType||'legacy')===type&&(existing.assignmentKey||'')===assignmentKey){
       if(dirty)saveState_(sh,item.row,p,info.email);
       return {view:publicView_(p,info,req.actor.externalId),sync:false,changed:false};
     }
     if(existing)prepareCancellation_(p,existing);
     var task=existing||{id:Utilities.getUuid()};
-    task.title=title;task.dueDate=due;task.time=time;task.deleted=false;task.lastError='';task.slots=slotsFor_(task);
+    task.title=title;task.dueDate=due;task.time=time;task.workType=type;task.assignmentKey=assignmentKey;
+    task.deleted=false;task.lastError='';task.slots=slotsFor_(task);
     if(!existing){p.tasks.push(task);p.totalCreated++;}
     bumpRevision_(p);
     saveState_(sh,item.row,p,info.email);
@@ -508,7 +713,8 @@ function runAction_(req){
       if(p.tasks.filter(function(t){return !t.deleted&&t.dueDate>=today;}).length>=MAX_ACTIVE){
         note('Đã đạt giới hạn 50 công việc chưa quá hạn.');continue;
       }
-      var task={id:Utilities.getUuid(),source:'icpv',sourceKey:key,title:title,
+      var keyAssignment=assignmentForSave_(info,String(source.assignmentKey||''),'kpi',null);
+      var task={id:Utilities.getUuid(),source:'icpv',sourceKey:key,workType:'kpi',assignmentKey:keyAssignment,title:title,
         dueDate:due,time:time,deleted:false,lastError:''};
       task.slots=slotsFor_(task);p.tasks.push(task);p.totalCreated++;
       summary.added++;changedTasks.push(task);
@@ -552,7 +758,8 @@ function runAction_(req){
       }
       if(due<today||dateMs_(due,time,0)<=now+30000||dateMs_(due,time,0)>limit)
         throw fail_('BAD_REQUEST','Thời hạn công việc ở dòng '+(i+1)+' đã quá hoặc không hợp lệ.');
-      planned.push({kind:kind,key:key,title:title,due:due,time:time,target:target});
+      var keyAssignment=assignmentForSave_(info,String(x.assignmentKey||''),'kpi',target);
+       planned.push({kind:kind,key:key,title:title,due:due,time:time,target:target,assignmentKey:keyAssignment});
     });
     var active=p.tasks.filter(function(t){return !t.deleted&&t.dueDate>=today;}).length;
     var added=planned.filter(function(x){return x.kind==='add';}).length;
@@ -561,22 +768,22 @@ function runAction_(req){
     planned.forEach(function(x){
       if(x.kind==='update'){
         var t=x.target;
-        if(t.title===x.title&&t.dueDate===x.due){
+        if(t.title===x.title&&t.dueDate===x.due&&(t.workType||'legacy')==='kpi'&&(t.assignmentKey||'')===x.assignmentKey){
           if(t.sourceKey!==x.key||t.source!=='icpv'){
-            t.source='icpv';t.sourceKey=x.key;changedTasks.push(t);summary.updated++;
+            t.source='icpv';t.sourceKey=x.key;t.workType='kpi';t.assignmentKey=x.assignmentKey;changedTasks.push(t);summary.updated++;
           }else summary.unchanged++;
           return;
         }
         prepareCancellation_(p,t);t.title=x.title;t.dueDate=x.due;t.slots=slotsFor_(t);t.lastError='';
         // Only explicitly chosen items are linked to the new source description.
-        t.source='icpv';t.sourceKey=x.key;
-        summary.updated++;changedTasks.push(t);
+        t.source='icpv';t.sourceKey=x.key;t.workType='kpi';t.assignmentKey=x.assignmentKey;
+         summary.updated++;changedTasks.push(t);
       }else{
         var already=p.tasks.some(function(t){return !t.deleted&&t.source==='icpv'&&t.sourceKey===x.key;});
         // Explicit ADD is allowed even with the same name/key: use a separate manual copy
         // rather than silently merging it into an existing iCPV-linked job.
         var task={id:Utilities.getUuid(),source:already?'manual':'icpv',
-          sourceKey:already?'':x.key,title:x.title,dueDate:x.due,time:x.time,
+          sourceKey:already?'':x.key,workType:'kpi',assignmentKey:x.assignmentKey,title:x.title,dueDate:x.due,time:x.time,
           deleted:false,lastError:'',slots:[]};
         task.slots=slotsFor_(task);p.tasks.push(task);p.totalCreated++;
         summary.added++;changedTasks.push(task);
@@ -607,22 +814,34 @@ function runAction_(req){
     if(!target)throw fail_('BAD_REQUEST','Không tìm thấy công việc cần xóa.');
     // mode=discard is a deliberately explicit exception for accidental/manual entries.
     var completed=d.mode==='completed'; // Older cached v1.4 clients remain deletion-only during rollout.
-    var manager=completed&&!isManagerRole_(info.role)&&info.managerEmail!==info.email?findActiveManager_(ss,info.managerEmail):null;
+    if(completed&&routingV2_()&&(!target.workType||target.workType==='legacy'))
+      throw fail_('BAD_REQUEST','Công việc cũ chưa phân loại. Hãy mở Sửa, chọn KPI hoặc Cá nhân và Phòng/Khu (nếu cần) trước khi đánh dấu hoàn thành.');
+    var isKpi=completed&&(target.workType==='kpi'||((!target.workType||target.workType==='legacy')&&!isManagerRole_(info.role)));
+    var route=isKpi?routeForTask_(ss,info,target):null;
+    var manager=route?{email:route.email,name:route.name}:null;
     prepareCancellation_(p,target);target.deleted=true;bumpRevision_(p);
     if(target.source==='icpv'&&target.sourceKey&&p.deletedSourceKeys.indexOf(target.sourceKey)===-1)
       p.deletedSourceKeys.push(target.sourceKey);
-    if(manager){
-      p.completionOutbox.push({id:Utilities.getUuid(),from:info.name,title:target.title.slice(0,90),
-        at:new Date().toISOString(),managerEmail:manager.email});
+    var completionId='';
+    if(isKpi&&(manager||target.workType==='kpi')){
+      completionId=Utilities.getUuid();
+      // Durable even when the administrator has not configured a valid approver.
+      p.completionOutbox.push({id:completionId,from:info.name,title:target.title.slice(0,90),
+        at:new Date().toISOString(),assignmentKey:target.assignmentKey||'',
+        unit:route?route.unit:info.unit,unitName:route?route.unitName:'',
+        routePending:!manager,managerEmail:manager?manager.email:''});
     }
     var urgentCancel=p.cancellations.some(function(c){return c.at>Date.now()+30000&&c.at<=Date.now()+90*60000;});
     saveState_(sh,item.row,p,info.email);
-    if(manager){try{deliverOutbox_(ss,manager.email);}catch(err){console.error('Manager delivery:',err.message||err);}}
+    var deliveredToManager=false;
+    if(manager&&completionId){try{deliveredToManager=deliverSingleCompletion_(ss,item.row,info.email,completionId,manager.email);}
+      catch(err){console.error('Manager delivery:',err.message||err);}}
     var out=publicView_(p,info,req.actor.externalId);
-    out.notice=!completed?(d.mode==='discard'?'Đã xóa công việc nhập nhầm.':'Đã xóa công việc.'):manager?
-      'Đã ghi nhận hoàn thành. Thông tin đã được chuyển đến Trưởng phòng.':
-      'Đã xóa công việc. Chưa có Trưởng phòng được cấu hình để nhận thông báo.';
-    return {view:out,sync:true,urgentSync:urgentCancel,changed:true,managerPushEmail:manager?manager.email:'',
+    out.notice=!completed?(d.mode==='discard'?'Đã xóa công việc nhập nhầm.':'Đã xóa công việc.'):!isKpi?
+       'Đã hoàn thành công việc cá nhân. Không gửi thông báo chấm điểm.':manager?
+      (deliveredToManager?'Đã chuyển thông báo chờ người quản lý xem xét.':'Đã ghi nhận hoàn thành KPI; thông báo đang chờ chuyển đến người quản lý.'):
+       (target.workType==='kpi'?'Đã ghi nhận hoàn thành KPI; chưa xác định được người chấm điểm. Sự kiện được lưu để xử lý.':'Đã xóa công việc. Chưa có Trưởng phòng được cấu hình để nhận thông báo.');
+    return {view:out,sync:true,urgentSync:urgentCancel,changed:true,managerPushEmail:deliveredToManager?manager.email:'',
       change:{type:'remove',id:target.id}};
   }
   throw fail_('BAD_REQUEST','Hành động không được hỗ trợ.');
@@ -654,7 +873,7 @@ function createManagerNotification_(notice,externalId,idempotencyKey,isReminder)
   return oneSignal_('post','/notifications',{
     app_id:prop_('ONESIGNAL_APP_ID'),target_channel:'push',include_aliases:{external_id:[externalId]},
     headings:{en:isReminder?'Nhắc chấm điểm công việc':'Nhân viên đã hoàn thành công việc'},
-    contents:{en:(isReminder?'Công việc chờ chấm điểm: ':'')+notice.from+' đã hoàn thành: '+notice.title.slice(0,60)+'. Vui lòng vào iCPV chấm điểm.'},
+    contents:{en:(isReminder?'Công việc chờ chấm điểm: ':'')+notice.from+' đã hoàn thành: '+notice.title.slice(0,60)+(notice.unitName?' ['+notice.unitName+']':'')+'. Vui lòng vào iCPV chấm điểm.'},
     url:prop_('WEB_URL'),idempotency_key:idempotencyKey||notice.id
   });
 }
@@ -781,16 +1000,56 @@ function finishJobs_(sh,row,email,results){
   });
   if(changed)saveState_(sh,row,p,email);
 }
+/** YC-032: send independent notifications concurrently at the provider request layer.
+ * The existing idempotency keys protect retries after an uncertain batch response.
+ * Unit tests and older environments safely use the individual-request fallback.
+ */
 function performJobs_(jobs){
+  if(!jobs.length)return [];
+  if(typeof UrlFetchApp!=='undefined'&&typeof UrlFetchApp.fetchAll==='function'&&jobs.length>1){
+    try{
+      var apiRequests=jobs.map(function(j){
+        var method=j.kind==='cancel'?'delete':'post',path='',body=null;
+        if(j.kind==='cancel')path='/notifications/'+encodeURIComponent(j.slot.id)+'?app_id='+encodeURIComponent(prop_('ONESIGNAL_APP_ID'));
+        else if(j.kind==='manager'||j.kind==='managerReminder'){
+          path='/notifications';body={app_id:prop_('ONESIGNAL_APP_ID'),target_channel:'push',
+            include_aliases:{external_id:[j.externalId]},
+            headings:{en:j.kind==='managerReminder'?'Nhắc chấm điểm công việc':'Nhân viên đã hoàn thành công việc'},
+            contents:{en:(j.kind==='managerReminder'?'Công việc chờ chấm điểm: ':'')+j.slot.from+' đã hoàn thành: '+j.slot.title.slice(0,60)+(j.slot.unitName?' ['+j.slot.unitName+']':'')+'. Vui lòng vào iCPV chấm điểm.'},
+            url:prop_('WEB_URL'),idempotency_key:j.idempotencyKey||j.slot.id};
+        }else{
+          path='/notifications';var offset=j.slot.offset,day=j.task.dueDate;
+          body={app_id:prop_('ONESIGNAL_APP_ID'),target_channel:'push',
+            include_aliases:{external_id:[j.externalId]},headings:{en:'Nhắc việc KPI'},
+            contents:{en:(offset===0?'Hôm nay đến hạn':'Còn '+offset+' ngày đến hạn')+' ('+vnDay_(day)+'): '+j.task.title.slice(0,48)},
+            url:prop_('WEB_URL'),send_after:new Date(j.slot.at).toISOString(),idempotency_key:j.slot.key};
+        }
+        var opts={url:'https://api.onesignal.com'+path,method:method,
+          headers:{Authorization:'Key '+prop_('ONESIGNAL_REST_API_KEY')},muteHttpExceptions:true};
+        if(body){opts.contentType='application/json';opts.payload=JSON.stringify(body);}
+        return opts;
+      });
+      var responses=UrlFetchApp.fetchAll(apiRequests);
+      if(!responses||responses.length!==jobs.length)throw new Error('OneSignal trả thiếu kết quả cho lô thông báo.');
+      return jobs.map(function(j,i){
+        var result={key:j.key,leaseUntil:j.slot.leaseUntil,kind:j.kind,sendDay:j.sendDay||'',id:'',error:''};
+        var code=responses[i].getResponseCode(),raw=responses[i].getContentText(),parsed={};
+        try{parsed=JSON.parse(raw);}catch(_ignored){}
+        if((code>=200&&code<300)||(j.kind==='cancel'&&code===404))result.id=String(parsed.id||'');
+        else result.error='OneSignal HTTP '+code+': '+String(parsed.errors||parsed.message||raw).slice(0,140);
+        return result;
+      });
+    }catch(batchError){
+      console.error('OneSignal batch uncertain; reconcile with idempotency keys:',batchError.message||batchError);
+      // Retry using identical keys. A prior accepted POST will not create another reminder.
+    }
+  }
   return jobs.map(function(j){
     var result={key:j.key,leaseUntil:j.slot.leaseUntil,kind:j.kind,sendDay:j.sendDay||'',id:'',error:''};
     try{
       if(j.kind==='manager'||j.kind==='managerReminder')result.id=String(createManagerNotification_(j.slot,j.externalId,j.idempotencyKey,j.kind==='managerReminder').id||'');
       else if(j.kind==='cancel')cancelNotification_(j.slot.id);
-      else {
-        var response=createNotification_(j.slot,j.task,j.externalId);
-        result.id=String(response.id||'');
-      }
+      else {var response=createNotification_(j.slot,j.task,j.externalId);result.id=String(response.id||'');}
     }catch(err){result.error=String(err.message||err);console.error('OneSignal '+j.kind+': '+result.error);}
     return result;
   });
@@ -827,7 +1086,7 @@ function claimManagerAlerts_(sh,row,email,maxCount){
 function syncManagerByEmail_(email,maxCalls){
   var context=withLock_(function(){
     var ss=book_(),sh=stateSheet_(ss),row=stateRowByEmail_(sh,email);
-    if(!row||!findActiveManager_(ss,email))return null;
+    if(!row||!approvedRecipient_(ss,email))return null;
     return {row:row,jobs:claimManagerAlerts_(sh,row,email,maxCalls)};
   });
   if(!context||!context.jobs.length)return;
@@ -864,6 +1123,38 @@ function doPost(e){
     return jsonOutput_({ok:false,code:err&&err.clientCode||'SERVER',error:err&&err.clientMessage||'Không thể xử lý. Vui lòng thử lại hoặc liên hệ quản trị viên.'});
   }
 }
+/** YC-032: bounded retry of durable completion events even when the manager PWA is closed.
+ * No new trigger or database: sender outboxes already persist in State.
+ * If a manager has never signed in there is no authenticated State/subscription yet;
+ * their first login performs delivery, and these events remain queued until then.
+ */
+function recoverPendingCompletions_(ss,rows,startIndex,maxRecipients){
+  var catalog=assignmentCatalog_(ss),active=catalog?activeEmailMap_(ss):null;
+  var access=accessRows_(ss),bySource={},present={},candidates=[];
+  access.forEach(function(r){bySource[String(r[0]||'').trim().toLowerCase()]=r;});
+  rows.forEach(function(r){if(r&&r[1])present[String(r[1]).trim().toLowerCase()]=true;});
+  for(var n=0;n<rows.length&&candidates.length<maxRecipients;n++){
+    var src=rows[(startIndex+n)%rows.length];if(!src||!src[2])continue;
+    var sourceEmail=String(src[1]||'').trim().toLowerCase(),accessRow=bySource[sourceEmail];
+    if(!accessRow||!enabled_(accessRow[2]))continue;
+    var profile;try{profile=normalizeState_(JSON.parse(String(src[2])));}catch(_err){continue;}
+    profile.completionOutbox.forEach(function(e){
+      if(candidates.length>=maxRecipients)return;
+      var dest='';
+      if(catalog&&e.assignmentKey){
+        var current=routingRecipient_(ss,sourceEmail,e.assignmentKey,catalog,active);
+        dest=current?current.email:'';
+      }else if(!e.assignmentKey&&!e.routePending){dest=String(accessRow[4]||'').trim().toLowerCase();}
+      if(dest&&present[dest]&&candidates.indexOf(dest)===-1)candidates.push(dest);
+    });
+  }
+  candidates.forEach(function(email){
+    var delivered=false;
+    try{delivered=withLock_(function(){return deliverOutbox_(ss,email);},1800);}
+    catch(err){console.error('Lỗi khôi phục thông báo chấm KPI: '+String(err.message||err));}
+    if(delivered){try{syncManagerByEmail_(email,2);}catch(err){console.error('Push người quản lý sẽ thử lại: '+String(err.message||err));}}
+  });
+}
 /** A single hourly trigger, fair circular iteration. No per-user triggers. */
 function syncScheduledNotifications(){
   var start=Date.now(),ss=book_(),sh=stateSheet_(ss),last=sh.getLastRow();
@@ -874,7 +1165,9 @@ function syncScheduledNotifications(){
   var n=rows.length,cursor=Number(props.getProperty('SYNC_CURSOR')||'0');
   if(!isFinite(cursor)||cursor<0)cursor=0;
   cursor=cursor%n;
-  var budget=35,processed=0;
+  // Recover manager inbox events before the normal due-date sweep. Bounded to protect quota.
+  try{recoverPendingCompletions_(ss,rows,cursor,8);}catch(recoverErr){console.error('Outbox retry:',recoverErr.message||recoverErr);}
+  var budget=70,processed=0; // YC-032: bounded fair backup; primary scheduling happens on save/sync.
   for(var step=0;step<n&&budget>0&&Date.now()-start<220000;step++){
     var idx=(cursor+step)%n,src=rows[idx];processed=step+1;
     if(!src||!src[2])continue;

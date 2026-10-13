@@ -62,3 +62,13 @@ Kiểm thử tự động không thay thế kiểm thử iPhone/Android/OneSigna
 - Không thay Apps Script, API, Sheets, OneSignal App ID hoặc tiện ích iCPV; chỉ cập nhật giao diện / logic trình duyệt.
 - **Chưa thể cam kết mọi thiết bị nhận tin nếu quyền bị chặn, browser không hỗ trợ hoặc cấu hình/đường truyền OneSignal gặp lỗi.** Cần thử trên máy thật và kiểm tra dashboard.
 - Hướng dẫn triển khai: [`docs/CAP-NHAT-V1.4.1-THONG-BAO-DA-THIET-BI.md`](docs/CAP-NHAT-V1.4.1-THONG-BAO-DA-THIET-BI.md).
+
+---
+
+## V1.9.2 – YC-028 / YC-030 / YC-032 (13/10/2026)
+
+Triển khai phân quyền thông báo chấm KPI theo Phòng/Khu (Trưởng phòng, Quyền Trưởng phòng, Ban Giám đốc; một người có thể kiêm nhiệm), công việc nhập thủ công mặc định **Cá nhân** còn nhập từ iCPV mặc định **KPI**, và cơ chế xử lý các thông báo độc lập với hàng đợi khôi phục.
+
+**Phải cập nhật Apps Script đồng bộ với giao diện**, sau đó quản trị viên chủ động chuẩn bị/kiểm tra/kích hoạt bảng `Phân công KPI`. Không có lệnh nào trong gói tự sửa Sheet production.
+
+Đọc đầy đủ [`docs/TRIEN-KHAI-V1.9.2-YC028-030-032.md`](docs/TRIEN-KHAI-V1.9.2-YC028-030-032.md) trước khi triển khai. Giữ lại source V1.9.1 để có thể khôi phục nếu cần.

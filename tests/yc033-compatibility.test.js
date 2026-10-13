@@ -96,18 +96,17 @@ test('YC-033: màn hình mới vẫn theo bản V1.9.0, thêm fallback viewport 
   assert.match(css,/min-height:100vh;min-height:100dvh/);
   assert.match(css,/dialog\.compat-dialog-open/);
   assert.match(css,/@media\(max-width:720px\)/);
-  assert.match(html,/\/styles\.css\?v=1\.9\.1/);
-  assert.match(html,/\/app\.js\?v=1\.9\.1/);
-  assert.match(html,/Phiên bản 1\.9\.1/);
+  assert.match(html,/\/styles\.css\?v=1\.9\.2/);
+  assert.match(html,/\/app\.js\?v=1\.9\.2/);
+  assert.match(html,/Phiên bản 1\.9\.2/);
   const pkg=JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8'));
-  assert.equal(pkg.version,'1.9.1');
+  assert.equal(pkg.version,'1.9.2');
 });
 
-test('YC-033: OneSignal worker, Apps Script, backend và Extension vẫn giữ nguyên baseline',()=>{
+test('YC-033: OneSignal worker, backend và Extension vẫn giữ nguyên baseline; Apps Script đổi theo YC-028/030/032',()=>{
   const crypto=require('node:crypto');
   // SHA-256 of unchanged baseline files in the source ZIP V1.9.0.
   const sha={
-    'apps-script/Code.gs':'d9602f6566d8b2ca900f1f643ad5c99e3ad20c8b71018224bac9230a4427acfd',
     'api/data.js':'ca50c634014549724a9934e65eedb62072ff7199564f696848425c4c2ee02540',
     'api/realtime.js':'65de03810884bce2e3a462b1ca1f582a6c928a62dca6a1759a69da77fbd65ac2',
     'api/config.js':'54421ff79a21f6f04a6a2a47f307d08c1794682376d083105844cd1ebeaa2ac3',
