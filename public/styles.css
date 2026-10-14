@@ -209,7 +209,7 @@ footer{font-size:10px;color:#8499a3;text-align:center;padding:15px 14px 24px}dia
  * UI only: no scheduling, authentication or API semantics.
  * ====================================================== */
 :root{font-family:'Be Vietnam Pro',system-ui,-apple-system,Arial,sans-serif;color:#17345b;background:#f2f6fe;--ui-blue:#0d5ee5;--ui-dark:#103d86;--ui-line:#dfe8f5;--ui-muted:#667e9f;--ui-surface:#fff;--ui-shadow:0 9px 34px rgba(35,85,157,.065)}
-body{background:linear-gradient(180deg,#edf4ff 0,#f4f7ff 320px,#f2f6fe 100%);color:#17345b}
+body{background:linear-gradient(115deg,#cc0b19 0%,#e63211 34%,#f87518 70%,#ffca43 100%);color:#17345b}
 button,input{font-family:inherit}
 button:focus-visible,input:focus-visible,summary:focus-visible{outline:3px solid #6daaff;outline-offset:2px}
 button{transition:background .16s ease,box-shadow .16s ease,transform .16s ease}
@@ -329,7 +329,7 @@ footer{color:#97a8bf;font-size:10px}
   .form-panel,.list-panel{padding:18px}.task{padding:12px 10px}
 }
 @media(max-width:720px){
-  body{background:#f2f6ff}
+  body{background:linear-gradient(115deg,#cc0b19 0%,#e63211 34%,#f87518 70%,#ffca43 100%)}
   .topbar{min-height:72px;padding:calc(12px + env(safe-area-inset-top)) 14px 12px}
   .brand{gap:9px}.brand-icon{flex:0 0 43px;width:43px;height:43px;border-radius:12px;font-size:24px}
   .brand h1{font-size:19px}.brand p{font-size:10px}
