@@ -1,8 +1,8 @@
 {
   "name": "nhac-viec-kpi-tan-hiep",
-  "version": "1.9.3",
+  "version": "1.9.3-hf2",
   "private": true,
-  "description": "Nhắc việc KPI Tân Hiệp – V1.9.3: YC-036, YC-037, YC-038; giữ nguyên các luồng khác",
+  "description": "Nhắc việc KPI Tân Hiệp – V1.9.3-HF2: YC-040 chỉ thay logo web/PWA; giữ luồng YC-036/037/038/039",
   "type": "commonjs",
   "engines": {
     "node": ">=20"

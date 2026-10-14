@@ -1,6 +1,6 @@
 'use strict';
 // Version 1.9.3: checking updates is separate from task/realtime revision.
-const APP_VERSION='1.9.3';
+const APP_VERSION='1.9.3-hf2';
 let versionCheckTimer=null;
 let versionPending='';
 let versionUpdateInProgress=false;

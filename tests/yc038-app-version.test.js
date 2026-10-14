@@ -11,10 +11,10 @@ test('YC-038: công bố nhất quán phiên bản app / CSS / JS',()=>{
   const req={method:'GET'};let code,json;
   cfg(req,{setHeader(){return this;},status(n){code=n;return this;},json(v){json=v;return this;}});
   // API config can return 503 in local tests without secrets; inspect source to confirm field.
-  assert.match(fs.readFileSync(path.join(root,'api/config.js'),'utf8'),/appVersion: '1\.9\.3'/);
-  assert.match(js,/const APP_VERSION='1\.9\.3'/);
-  assert.match(html,/\/app\.js\?v=1\.9\.3/);
-  assert.match(html,/\/styles\.css\?v=1\.9\.3/);
+  assert.match(fs.readFileSync(path.join(root,'api/config.js'),'utf8'),/appVersion: '1\.9\.3-hf2'/);
+  assert.match(js,/const APP_VERSION='1\.9\.3-hf2'/);
+  assert.match(html,/\/app\.js\?v=1\.9\.3-hf2/);
+  assert.match(html,/\/styles\.css\?v=1\.9\.3-hf2/);
   assert.match(js,/visibilitychange/);assert.match(js,/versionCheck/);
   assert.match(js,/hasUnsavedUserWork/);assert.match(js,/location\.replace/);
   assert.ok(vercel.headers.some(h=>h.source==='/'&&h.headers.some(x=>x.key==='Cache-Control')));
