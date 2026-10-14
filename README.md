@@ -1,3 +1,5 @@
+> **Bản cập nhật 14/10/2026 – V1.9.2-HF3**: sửa YC-035 Push/chuyển tài khoản và dọn menu Google Sheets. Xem `docs/HUONG-DAN-V1.9.2-HF3-YC035-PUSH-VA-MENU.md`. Không tự động sửa dữ liệu hoặc triển khai production.
+
 # Nhắc việc KPI – Tân Hiệp v1.6.0
 
 **Bản cập nhật đã CHỐT ngày 09/10/2026.** Giữ nguyên kiến trúc v1.4.1, chỉ bổ sung đồng bộ iCPV chọn lọc, xác nhận hoàn thành khi xóa việc, thông báo cho Trưởng phòng và thống kê quản trị.

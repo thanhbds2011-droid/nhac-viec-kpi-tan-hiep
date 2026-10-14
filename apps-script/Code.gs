@@ -220,22 +220,11 @@ function inspectVietnameseAdminSheets(){
   return result;
 }
 function onOpen(){
-  // Menu chỉ xuất hiện nếu Apps Script được gắn trực tiếp với Google Sheets.
+  // Một thao tác an toàn dành cho người quản trị; giữ tất cả hàm bảo trì/rollback
+  // trong trình biên tập Apps Script, không đưa lên menu cho người dùng cuối.
   try{SpreadsheetApp.getUi().createMenu('Nhắc việc KPI')
-    .addItem('1. Chuẩn bị bảng tiếng Việt','prepareVietnameseAdminSheets')
-    .addItem('2. Kiểm tra phân quyền','inspectVietnameseAdminSheets')
-    .addItem('3. Kích hoạt phân quyền','activateVietnameseAdminSheets')
-    .addItem('4. Quay lại Access cũ','rollbackVietnameseAdminSheets')
-    .addItem('5. Bổ sung cột quyền quản trị','prepareAdminPermissionColumn')
-    .addSeparator().addItem('6. Chuẩn bị phân công KPI','prepareKpiRoutingSheets')
-    .addItem('7. Kiểm tra phân công KPI','inspectKpiRoutingSheets')
-    .addItem('8. Bổ sung lựa chọn chức vụ KPI','prepareKpiRoleDropdowns')
-    .addItem('9. Kích hoạt phân công KPI','activateKpiRoutingSheets')
-    .addItem('10. Tắt phân công KPI V2','rollbackKpiRoutingSheets')
-    .addSeparator().addItem('11. Tạo bản nháp quản trị 1 tab','prepareUnifiedAdminSheet')
-    .addItem('12. Kiểm tra tab hợp nhất','inspectUnifiedAdminSheet')
-    .addItem('13. Kích hoạt tab hợp nhất','activateUnifiedAdminSheet')
-    .addItem('14. Khôi phục cấu hình cũ','rollbackUnifiedAdminSheet').addToUi();}catch(_e){}
+    .addItem('Kiểm tra nhân sự và phân quyền','inspectUnifiedAdminSheet')
+    .addToUi();}catch(_e){}
 }
 
 function jsonOutput_(o){return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON);}
@@ -1067,6 +1056,8 @@ function runAction_(req){
       (deliveredToManager?'Đã chuyển thông báo chờ người quản lý xem xét.':'Đã ghi nhận hoàn thành KPI; thông báo đang chờ chuyển đến người quản lý.'):
        (target.workType==='kpi'?'Đã ghi nhận hoàn thành KPI; chưa xác định được người chấm điểm. Sự kiện được lưu để xử lý.':'Đã xóa công việc. Chưa có Trưởng phòng được cấu hình để nhận thông báo.');
     return {view:out,sync:true,urgentSync:urgentCancel,changed:true,managerPushEmail:deliveredToManager?manager.email:'',
+      pendingDelivery:manager&&completionId&&!deliveredToManager?{
+        sourceRow:item.row,sourceEmail:info.email,recipientEmail:manager.email,completionId:completionId}:null,
       change:{type:'remove',id:target.id}};
   }
   throw fail_('BAD_REQUEST','Hành động không được hỗ trợ.');
@@ -1308,6 +1299,16 @@ function claimManagerAlerts_(sh,row,email,maxCount){
   if(changed)saveState_(sh,row,p,email);
   return jobs;
 }
+function managerRealtimeHint_(ss,email){
+  var sh=stateSheet_(ss),row=stateRowByEmail_(sh,email);
+  if(!row||!approvedRecipient_(ss,email))return null;
+  var subject=String(sh.getRange(row,1).getValue()||'');
+  var raw=String(sh.getRange(row,3).getValue()||'');
+  if(!subject||!raw)return null;
+  var p=normalizeState_(JSON.parse(raw));
+  if(!p.inbox.some(function(x){return !x.dismissed;}))return null;
+  return {subject:subject,revision:p.revision};
+}
 function syncManagerByEmail_(email,maxCalls){
   var context=withLock_(function(){
     var ss=book_(),sh=stateSheet_(ss),row=stateRowByEmail_(sh,email);
@@ -1335,14 +1336,30 @@ function doPost(e){
       // hourly sync retries in the background. Frontend explicitly labels pending work.
       // Nonurgent user mutations are queued for a separate nonblocking sync request.
     }
-    // Manager completion alerts must not depend on the EMPLOYEE's urgent due-date cancellation.
-    // The completion event and target inbox were committed above, under lock. Deliver to the
-    // manager immediately when possible; the existing hourly trigger remains the retry fallback.
+    // Nếu thao tác chuyển từ outbox vào inbox bị lỗi thoáng qua, thử lại sau
+    // khi transaction của nhân viên đã được COMMIT. Không mất dữ liệu nếu vẫn lỗi.
+    if(result.pendingDelivery&&!result.managerPushEmail){
+      try{
+        var retryDelivered=withLock_(function(){
+          var a=result.pendingDelivery;
+          return deliverSingleCompletion_(book_(),a.sourceRow,a.sourceEmail,a.completionId,a.recipientEmail);
+        });
+        if(retryDelivered)result.managerPushEmail=result.pendingDelivery.recipientEmail;
+      }catch(deliveryErr){console.error('Completion delivery deferred:',deliveryErr.message||deliveryErr);}
+    }
+    // Push người quản lý không chờ việc hủy lịch nhắc của nhân viên.
+    // Realtime là tín hiệu THAY ĐỔI không chứa nội dung công việc, chỉ phát
+    // sau khi thông báo đã được đưa vào inbox có State xác thực.
+    var managerRealtime=null;
     if(result.managerPushEmail){
       try{syncManagerByEmail_(result.managerPushEmail,2);}catch(managerErr){console.error('Deferred manager push:',managerErr.message||managerErr);}
+      try{managerRealtime=withLock_(function(){return managerRealtimeHint_(book_(),result.managerPushEmail);});}
+      catch(realtimeErr){console.error('Manager change signal deferred:',realtimeErr.message||realtimeErr);}
     }
     return jsonOutput_({ok:true,result:result.view,changed:!!result.changed,change:result.change||null,
-      needsSync:!!result.sync&&!syncedInline});
+      needsSync:!!result.sync&&!syncedInline,
+      // Internal server-only routing metadata. api/data.js MUST NOT send this to browser.
+      managerRealtime:managerRealtime});
   }catch(err){
     console.error('doPost:',err&&err.stack||err);
     return jsonOutput_({ok:false,code:err&&err.clientCode||'SERVER',error:err&&err.clientMessage||'Không thể xử lý. Vui lòng thử lại hoặc liên hệ quản trị viên.'});

@@ -70,10 +70,21 @@ module.exports = async (req, res) => {
     if (p.fromGoogle)payloadOut.sessionToken=signSession(p,PUSH_ID_SECRET);
     if (upstreamData.changed)payloadOut.change=upstreamData.change;
     if (upstreamData.needsSync)payloadOut.needsSync=true;
-    if (upstreamData.changed && upstreamData.change && process.env.ABLY_API_KEY) {
-      const event = { revision: upstreamData.result.revision, change: upstreamData.change };
-      try { await publishChange(p.sub, event, process.env); }
-      catch (err) { console.error('Realtime publication failed:', err.message); }
+    if (process.env.ABLY_API_KEY) {
+      if (upstreamData.changed && upstreamData.change) {
+        const event = { revision: upstreamData.result.revision, change: upstreamData.change };
+        try { await publishChange(p.sub, event, process.env); }
+        catch (err) { console.error('Realtime publication failed:', err.message); }
+      }
+      // GAS returned the manager subject ONLY to this trusted server. Never disclose
+      // the receiver's subject/email/channel to the employee's browser.
+      const target = upstreamData.managerRealtime;
+      if (target && typeof target.subject === 'string' && target.subject &&
+          Number.isSafeInteger(target.revision) && target.subject !== p.sub) {
+        try { await publishChange(target.subject,
+          { revision: target.revision, change: { type: 'inboxChanged' } }, process.env); }
+        catch (err) { console.error('Manager realtime hint failed:', err.message); }
+      }
     }
     return reply(res, 200, payloadOut);
   } catch (err) {

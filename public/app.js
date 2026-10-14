@@ -11,9 +11,34 @@ const $ = id => document.getElementById(id);
 const state = {
   config:null,credential:'',user:null,tasks:[],defaultTime:'07:30',editingId:null,
   onesignal:null,pushError:'',pushBoundAccount:'',busy:false,pushBusy:false,signingOut:false,sessionEpoch:0,filter:'all',
-  revision:0,inbox:[],deletedSourceKeys:[],isAdmin:false,managerConfigured:false,routingEnabled:false,assignments:[],realtime:null,broadcast:null,localRevisionKey:'',realtimeEpoch:0,lastVersionCheck:0,queuedChanges:[],checkingVersion:false,sessionToken:'',reconcileAfterBusy:false
+  revision:0,inbox:[],deletedSourceKeys:[],isAdmin:false,managerConfigured:false,routingEnabled:false,assignments:[],realtime:null,realtimeAttached:false,broadcast:null,localRevisionKey:'',realtimeEpoch:0,lastVersionCheck:0,queuedChanges:[],checkingVersion:false,sessionToken:'',reconcileAfterBusy:false
 };
 let identityQueue=Promise.resolve();
+let pushBindRetryTimer=null;
+let pushBindRetryAttempt=0;
+function clearPushBindRetry(){
+  clearTimeout(pushBindRetryTimer);pushBindRetryTimer=null;pushBindRetryAttempt=0;
+}
+// Thử lại CHỈ liên kết định danh OneSignal, không tự xin quyền thông báo.
+// Một session mới hủy toàn bộ lần retry của account cũ.
+function bindPushForCurrentSession(externalId,epoch){
+  void initPush(externalId).then(()=>{
+    if(epoch===state.sessionEpoch&&state.user?.externalId===externalId){
+      clearPushBindRetry();pushState();
+    }
+  }).catch(()=>{
+    if(epoch!==state.sessionEpoch||state.user?.externalId!==externalId)return;
+    const delays=[5000,15000,30000,60000];
+    if(pushBindRetryAttempt>=delays.length)return;
+    const delay=delays[pushBindRetryAttempt++];
+    clearTimeout(pushBindRetryTimer);
+    pushBindRetryTimer=setTimeout(()=>{
+      if(epoch===state.sessionEpoch&&state.user?.externalId===externalId)
+        bindPushForCurrentSession(externalId,epoch);
+    },delay);
+  });
+}
+
 let activeMobilePane='list';
 const PANE_IDS={create:'createPane',list:'listPane',schedule:'schedulePane',notifications:'notificationsPane',profile:'profilePane',admin:'adminPane'};
 const NAV_IDS={list:'tabList',schedule:'tabSchedule',notifications:'tabNotifications',profile:'tabProfile'};
@@ -306,6 +331,17 @@ async function checkRevision(force=false){
   }catch(err){syncIndicator('Chưa đồng bộ · Kiểm tra kết nối');}
   finally{state.checkingVersion=false;}
 }
+// Cơ chế đối soát giới hạn khi Ably chưa hoạt động (không tải toàn bộ liên tục).
+let inboxFallbackTimer=null;
+function stopInboxFallback(){clearInterval(inboxFallbackTimer);inboxFallbackTimer=null;}
+function startInboxFallback(){
+  stopInboxFallback();
+  inboxFallbackTimer=setInterval(()=>{
+    if(!state.user||document.hidden||state.busy||state.signingOut)return;
+    if(state.realtime?.connection?.state==='connected'&&state.realtimeAttached)return;
+    void checkRevision();
+  },120000);
+}
 let ablySdkPromise=null;
 function loadAblySdk(){
   if(window.Ably)return Promise.resolve(window.Ably);
@@ -352,7 +388,11 @@ async function connectRealtime(){
       if(epoch===state.sessionEpoch&&state.user?.externalId===externalId)receiveChange(message.data);
     });
     if(subscription&&typeof subscription.catch==='function')subscription.catch(err=>console.warn('Ably subscribe:',err.message));
-    channel.on('attached',()=>{if(epoch===state.sessionEpoch)void checkRevision(true);});
+    channel.on('attached',()=>{
+      if(epoch===state.sessionEpoch){state.realtimeAttached=true;void checkRevision(true);}
+    });
+    channel.on('detached',()=>{if(epoch===state.sessionEpoch)state.realtimeAttached=false;});
+    channel.on('failed',()=>{if(epoch===state.sessionEpoch)state.realtimeAttached=false;});
     client.connection.on('connected',()=>{
       if(epoch!==state.sessionEpoch)return;
       syncIndicator('Đã kết nối đa thiết bị');
@@ -368,7 +408,7 @@ function disconnectRealtime(){
   if(state.broadcast){state.broadcast.close();state.broadcast=null;}
   state.localRevisionKey='';
   if(state.realtime){try{state.realtime.close();}catch(_){}state.realtime=null;}
-  state.queuedChanges=[];state.revision=0;state.lastVersionCheck=0;state.reconcileAfterBusy=false;
+  stopInboxFallback();state.realtimeAttached=false;state.queuedChanges=[];state.revision=0;state.lastVersionCheck=0;state.reconcileAfterBusy=false;
 }
 async function refresh(){
   if(state.busy)return;setBusy(true,'reload');
@@ -686,8 +726,8 @@ async function signedIn(response){
     // Asynchronous login; never block the task list or load a push SDK on unsupported devices.
     state.pushBoundAccount='';state.pushError='';
     if(pushDeviceIssue())pushState();
-    else void initPush(data.externalId).catch(()=>{});
-    void connectRealtime();
+    else bindPushForCurrentSession(data.externalId,epoch);
+    startInboxFallback();void connectRealtime();
     // The Chrome extension delivers staged data only after successful Google login.
     window.postMessage({kind:'TAN_HIEP_ICPV_IMPORT_READY_V1'},location.origin);
   }catch(err){state.credential='';state.sessionToken='';$('loginHint').textContent=err.message;notify(err.message,true);}
@@ -695,7 +735,7 @@ async function signedIn(response){
 }
 async function signout(){
   if(state.busy||state.signingOut)return;
-  state.signingOut=true;state.sessionEpoch++;disconnectRealtime();setBusy(true);
+  state.signingOut=true;state.sessionEpoch++;clearPushBindRetry();disconnectRealtime();setBusy(true);
   try{
     // Serialize with an in-progress OneSignal.login to prevent cross-account binding.
     await queueIdentity(async()=>{if(state.onesignal)await state.onesignal.logout();});
