@@ -268,6 +268,13 @@ function roleKind_(role){
   if(['EMPLOYEE','USER','NHAN VIEN'].indexOf(r)!==-1)return 'EMPLOYEE';
   return '';
 }
+/** Distinguish leadership for the NEW BGD->Director route without changing legacy DIRECTOR keys. */
+function directorLevel_(title){
+  var value=textKey_(title);
+  if(['GIAM DOC','DIRECTOR_HEAD'].indexOf(value)!==-1)return 'HEAD';
+  if(['PHO GIAM DOC','DEPUTY_DIRECTOR'].indexOf(value)!==-1)return 'DEPUTY';
+  return roleKind_(title)==='DIRECTOR'?'UNSPECIFIED':'';
+}
 function isVietnameseSchema_(){return prop_(ACCOUNT_SCHEMA_KEY)==='VI';}
 function isUnifiedSchema_(){return prop_(UNIFIED_SCHEMA_KEY)==='V1';}
 /** YC-034: one admin sheet, one person/email/row; State stays separately unchanged.
@@ -280,11 +287,11 @@ function unifiedUnits_(raw){
   return String(raw||'').split(/[,;|\n]+/).map(function(x){return x.trim().toUpperCase();}).filter(Boolean);
 }
 function unifiedModel_(ss){
-  var sh=ss.getSheetByName(SHEET_UNIFIED),errors=[],people=[],assignments=[],departments=[],seen={},roles={};
-  if(!sh)return {people:[],departments:[],assignments:[],errors:['Thiếu tab '+SHEET_UNIFIED+'.']};
+  var sh=ss.getSheetByName(SHEET_UNIFIED),errors=[],warnings=[],people=[],assignments=[],departments=[],seen={},roles={};
+  if(!sh)return {people:[],departments:[],assignments:[],errors:['Thiếu tab '+SHEET_UNIFIED+'.'],warnings:[]};
   var headers=sh.getRange(1,1,1,8).getDisplayValues()[0];
   UNIFIED_HEADERS.forEach(function(h,i){if(String(headers[i]||'').trim()!==h)errors.push('Sai tiêu đề cột '+String.fromCharCode(65+i)+': yêu cầu '+h+'.');});
-  if(errors.length)return {people:[],departments:[],assignments:[],errors:errors};
+  if(errors.length)return {people:[],departments:[],assignments:[],errors:errors,warnings:warnings};
   var rows=sh.getLastRow()>1?sh.getRange(2,1,sh.getLastRow()-1,8).getDisplayValues():[];
   var all={},byUnit={},dup={},emailReg=/^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   rows.forEach(function(r,i){
@@ -305,6 +312,8 @@ function unifiedModel_(ss){
     if(other&&(!extraRole||extraRole==='ADMIN'||extraRole==='DIRECTOR'))
       errors.push('Dòng '+n+': chức danh kiêm nhiệm không hợp lệ.');
     if(role==='DIRECTOR'&&unit!=='BGD')errors.push('Dòng '+n+': Giám đốc/Phó Giám đốc phải có đơn vị chính BGD.');
+    if(role==='DIRECTOR'&&directorLevel_(title)==='UNSPECIFIED')
+      warnings.push('Dòng '+n+': hãy ghi rõ Giám đốc hoặc Phó Giám đốc tại cột D để xác định tuyến chấm KPI cấp Ban Giám đốc.');
     if(role==='DIRECTOR'&&other)errors.push('Dòng '+n+': thành viên BGD không cần nhập chức danh phụ trách ở cột G.');
     if(role==='ADMIN'&&(extra.length||other))errors.push('Dòng '+n+': Quản trị viên độc lập không có chức vụ nghiệp vụ.');
     if(role!=='DIRECTOR'&&role!=='ADMIN'&&unit==='BGD')errors.push('Dòng '+n+': BGD chỉ dành cho chức danh Ban Giám đốc.');
@@ -318,6 +327,9 @@ function unifiedModel_(ss){
     all[email]={name:name,active:active,title:title,role:role,unit:unit,extra:extra,extraRole:extraRole,admin:admin};
     people.push([email,name,active?'Hoạt động':'Ngừng hoạt động',title,'',unit,admin]);
     if(!active||!role||role==='ADMIN')return;
+    // A BGD member's OWN KPI belongs to BGD, independently of departments they oversee.
+    // The legacy department keys remain intact for receiving head-of-department reports.
+    if(role==='DIRECTOR')assignments.push([email,'BGD','Ban Giám đốc']);
     var specs=role==='DIRECTOR'?extra.map(function(code){return {unit:code,role:'DIRECTOR'};}):
       [{unit:unit,role:role}].concat(extra.map(function(code){return {unit:code,role:extraRole};}));
     specs.forEach(function(spec){
@@ -337,6 +349,8 @@ function unifiedModel_(ss){
   var leadership=[];
   Object.keys(all).forEach(function(email){if(all[email].active&&all[email].role==='DIRECTOR'&&!dup[email])leadership.push(email);});
   if(leadership.length)departments.push(['BGD','Ban Giám đốc','','','','','']);
+  var heads=Object.keys(all).filter(function(email){return all[email].active&&!dup[email]&&directorLevel_(all[email].title)==='HEAD';});
+  if(heads.length!==1)warnings.push('Ban Giám đốc: cần ghi rõ đúng một tài khoản Giám đốc đang hoạt động ở cột D; nếu chưa đúng, thông báo Phó Giám đốc → Giám đốc sẽ được giữ chờ.');
   Object.keys(byUnit).sort().forEach(function(key){
     var d=byUnit[key],head=d.head||[],acting=d.acting||[],director=d.director||[],vice=d.vice||[];
     if(head.length+acting.length!==1)errors.push('Phòng/Khu '+key+': cần đúng một Trưởng phòng hoặc Quyền Trưởng phòng.');
@@ -349,7 +363,7 @@ function unifiedModel_(ss){
   // During migration the unit name may be a code. No old admin sheet is consulted in unified mode.
   var headByUnit={};departments.forEach(function(d){if(d[0]!=='BGD')headByUnit[d[0]]=d[5]||d[2]||'';});
   people.forEach(function(r){r[4]=headByUnit[r[5]]||'';});
-  return {people:people,departments:departments,assignments:assignments,errors:errors};
+  return {people:people,departments:departments,assignments:assignments,errors:errors,warnings:warnings};
 }
 /** Draft creation is explicit. Never edits 3 old tabs or State, never activates itself. */
 function prepareUnifiedAdminSheet(){
@@ -406,11 +420,12 @@ function prepareUnifiedAdminSheet(){
 }
 function validateUnifiedAdminSheet(){
   var result=unifiedModel_(book_());
-  return {ok:!result.errors.length,errors:result.errors,accounts:result.people.length,units:result.departments.length,departments:result.departments.length,assignments:result.assignments.length};
+  return {ok:!result.errors.length,errors:result.errors,warnings:result.warnings||[],accounts:result.people.length,units:result.departments.length,departments:result.departments.length,assignments:result.assignments.length};
 }
 function inspectUnifiedAdminSheet(){
   var v=validateUnifiedAdminSheet(),message=v.ok?'Hợp lệ: '+v.accounts+' tài khoản, '+v.assignments+' phân công, '+v.departments+' đơn vị.':
     'Cần sửa '+v.errors.length+' vấn đề:\n'+v.errors.join('\n');
+  if(v.warnings&&v.warnings.length)message+='\n\nCần kiểm tra bổ sung ('+v.warnings.length+'):\n'+v.warnings.join('\n');
   Logger.log(message);
   try{SpreadsheetApp.getUi().alert('Kiểm tra nhân sự và phân quyền',message,SpreadsheetApp.getUi().ButtonSet.OK);}catch(_ignored){}
   return v;
@@ -470,7 +485,8 @@ function activeEmailMap_(ss){
     var email=String(r[0]||'').trim().toLowerCase();
     if(!email)return;
     if(map[email])map[email].active=false; // ambiguous duplicate fails closed
-    else map[email]={active:enabled_(r[2]),name:String(r[1]||'').trim(),role:roleKind_(r[3]),unit:String(r[5]||'').trim()};
+    else map[email]={active:enabled_(r[2]),name:String(r[1]||'').trim(),role:roleKind_(r[3]),
+      directorLevel:directorLevel_(r[3]),unit:String(r[5]||'').trim()};
   });
   return map;
 }
@@ -479,13 +495,25 @@ function approvedRecipient_(ss,email){
   if(!routingV2_())return !!findActiveManager_(ss,normalized);
   var active=activeEmailMap_(ss);if(!active[normalized]||!active[normalized].active)return false;
   var catalog=assignmentCatalog_(ss);
+  // The Director may have no department in F but can still grade Deputy Directors.
+  if(isUnifiedSchema_()&&active[normalized].directorLevel==='HEAD'){
+    var heads=Object.keys(active).filter(function(e){return active[e].active&&active[e].directorLevel==='HEAD';});
+    if(heads.length===1)return true;
+  }
   return Object.keys(catalog.departments).some(function(unit){
     var d=catalog.departments[unit];return !isLeadershipUnit_(unit)&&!d.invalid&&!(d.head&&d.acting)&&
       (d.head===normalized||d.acting===normalized||d.director===normalized);
   });
 }
 function routingRecipient_(ss,sourceEmail,assignmentKey,catalog,active){
-  var list=(catalog&&catalog.assignments[String(sourceEmail||'').toLowerCase()])||[];
+  var sender=String(sourceEmail||'').toLowerCase();
+  if(isUnifiedSchema_()&&assignmentKey==='BGD::DIRECTOR'){
+    if(!active||!active[sender]||!active[sender].active||active[sender].directorLevel!=='DEPUTY')return null;
+    var leaders=Object.keys(active).filter(function(e){return active[e].active&&active[e].directorLevel==='HEAD';});
+    if(leaders.length!==1||leaders[0]===sender)return null;
+    return {email:leaders[0],name:active[leaders[0]].name,unit:'BGD',unitName:'Ban Giám đốc',role:'DIRECTOR'};
+  }
+  var list=(catalog&&catalog.assignments[sender])||[];
   var assigned=list.filter(function(a){return a.key===assignmentKey;});
   if(assigned.length!==1)return null;
   var a=assigned[0],dept=catalog.departments[a.unit];
@@ -510,6 +538,11 @@ function routeForTask_(ss,info,task,catalog,active){
 function assignmentForSave_(info,key,type,existing){
   if(type!=='kpi')return '';
   var assignments=info.assignments||[];
+  if(routingV2_()&&isUnifiedSchema_()&&roleKind_(info.role)==='DIRECTOR'){
+    assignments=assignments.filter(function(a){return a.key==='BGD::DIRECTOR';});
+    if(!key||key==='legacy'||(existing&&(!existing.assignmentKey||existing.assignmentKey!=='BGD::DIRECTOR')))
+      key='BGD::DIRECTOR';
+  }
   if(!routingV2_())return existing&&existing.assignmentKey?existing.assignmentKey:''; // Keep V2 context during rollback; never misroute.
   if(existing&&existing.assignmentKey&&!key)key=existing.assignmentKey;
   if(!key&&assignments.length===1)key=assignments[0].key;
@@ -659,7 +692,12 @@ function checkAccess_(ss,actor){
     if(String(entries[i][0]).trim().toLowerCase()!==email)continue;
     if(!enabled_(entries[i][2]))throw fail_('FORBIDDEN','Tài khoản chưa được kích hoạt hoặc đã bị thu hồi quyền.');
     var catalog=assignmentCatalog_(ss);
-    return {email:email,name:String(entries[i][1]).trim()||String(actor.name||'').slice(0,80)||email,role:String(entries[i][3]||'').trim(),managerEmail:String(entries[i][4]||'').trim().toLowerCase(),unit:String(entries[i][5]||'').trim(),isAdmin:adminPermission_(entries[i][6],entries[i][3]),assignments:catalog?(catalog.assignments[email]||[]):[],routingEnabled:!!catalog};
+    var role=String(entries[i][3]||'').trim();
+    var myAssignments=catalog?(catalog.assignments[email]||[]):[];
+    if(isUnifiedSchema_()&&roleKind_(role)==='DIRECTOR')myAssignments=myAssignments.filter(function(a){return a.key==='BGD::DIRECTOR';});
+    return {email:email,name:String(entries[i][1]).trim()||String(actor.name||'').slice(0,80)||email,
+      role:role,managerEmail:String(entries[i][4]||'').trim().toLowerCase(),unit:String(entries[i][5]||'').trim(),
+      isAdmin:adminPermission_(entries[i][6],entries[i][3]),assignments:myAssignments,routingEnabled:!!catalog};
   }
   throw fail_('FORBIDDEN','Tài khoản Google này chưa có trong danh sách Access.');
 }
@@ -712,7 +750,7 @@ function publicView_(profile,info,ext){
     inbox:profile.inbox.filter(function(n){return !n.dismissed;}).map(function(n){return {id:n.id,from:n.from,title:n.title,at:n.at,unit:n.unit||'',unitName:n.unitName||''};}),
     tasks:profile.tasks.filter(function(t){return !t.deleted;}).map(function(t){
       var pending=(t.slots||[]).filter(function(s){return !s.id&&s.at>now&&s.at<=horizon;}).length;
-      return {id:t.id,title:t.title,dueDate:t.dueDate,time:t.time,sourceKey:t.sourceKey||'',workType:t.workType||'legacy',assignmentKey:t.assignmentKey||'',pending:pending,
+      return {id:t.id,title:t.title,dueDate:t.dueDate,time:t.time,sourceKey:t.sourceKey||'',workType:info.routingEnabled&&(!t.workType||t.workType==='legacy')?'kpi':(t.workType||'legacy'),legacyKpi:!!info.routingEnabled&&(!t.workType||t.workType==='legacy'),assignmentKey:t.assignmentKey||'',pending:pending,
         warning:profile.cancellations.length?'Một số lịch cũ đang chờ hủy.':(t.lastError||'')};
     })};
 }
@@ -868,7 +906,15 @@ function runAction_(req){
     requireRevision_(d,p);
     var existing=d.id?p.tasks.find(function(t){return t.id===d.id&&!t.deleted;}):null;
     var requestedType=String(d.workType||'');
-    var type=existing&&(!requestedType||requestedType==='legacy')?(existing.workType||'legacy'):(requestedType||'legacy');
+    if(!existing&&routingV2_()&&!requestedType)
+      throw fail_('BAD_REQUEST','Phiên bản ứng dụng đã cũ. Hãy mở lại Nhắc việc trước khi đăng ký công việc mới.');
+    // A historical KPI may be edited (title/deadline/time) WITHOUT compulsory reclassification.
+    // Preserve its raw legacy marker until an explicit valid assignment is provided.
+    var editingLegacy=!!existing&&routingV2_()&&(!existing.workType||existing.workType==='legacy');
+    if(editingLegacy&&requestedType==='personal')
+      throw fail_('BAD_REQUEST','Công việc lịch sử là KPI; không được chuyển thành Cá nhân.');
+    var type=editingLegacy&&!d.assignmentKey?(existing.workType||'legacy'):
+      existing&&(!requestedType||requestedType==='legacy')?(existing.workType||'legacy'):(requestedType||'legacy');
     if(['personal','kpi','legacy'].indexOf(type)===-1)
       throw fail_('BAD_REQUEST','Loại công việc không hợp lệ.');
     if(existing&&existing.source==='icpv'&&type==='personal')throw fail_('BAD_REQUEST','Không thể chuyển nhiệm vụ iCPV sang công việc cá nhân.');
@@ -1026,22 +1072,40 @@ function runAction_(req){
     requireRevision_(d,p);
     var target=p.tasks.find(function(t){return t.id===d.id&&!t.deleted;});
     if(!target)throw fail_('BAD_REQUEST','Không tìm thấy công việc cần xóa.');
-    // mode=discard is a deliberately explicit exception for accidental/manual entries.
-    var completed=d.mode==='completed'; // Older cached v1.4 clients remain deletion-only during rollout.
-    if(completed&&routingV2_()&&(!target.workType||target.workType==='legacy'))
-      throw fail_('BAD_REQUEST','Công việc cũ chưa phân loại. Hãy mở Sửa, chọn KPI hoặc Cá nhân và Phòng/Khu (nếu cần) trước khi đánh dấu hoàn thành.');
-    var isKpi=completed&&(target.workType==='kpi'||((!target.workType||target.workType==='legacy')&&!isManagerRole_(info.role)));
-    var route=isKpi?routeForTask_(ss,info,target):null;
+    // Fail closed for cached clients that cannot distinguish completing from discarding.
+    if(routingV2_()&&['completed','discard'].indexOf(String(d.mode||''))===-1)
+      throw fail_('BAD_REQUEST','Phiên bản ứng dụng đã cũ. Hãy tải lại trang trước khi xóa hoặc hoàn thành KPI.');
+    var completed=d.mode==='completed';
+    var legacy=!target.workType||target.workType==='legacy';
+    var isKpi=completed&&(target.workType==='kpi'||legacy);
+    var isTopHead=isKpi&&routingV2_()&&isUnifiedSchema_()&&directorLevel_(info.role)==='HEAD';
+    var routingKey=target.assignmentKey||'';
+    // Previously registered BGD work may carry a department key; its owner is still
+    // a member of BGD and must follow the Director/Deputy route, not a department route.
+    if(isKpi&&routingV2_()&&isUnifiedSchema_()&&roleKind_(info.role)==='DIRECTOR')
+      routingKey='BGD::DIRECTOR';
+    if(isKpi&&routingV2_()&&legacy&&!routingKey){
+      var available=info.assignments||[];
+      if(roleKind_(info.role)==='DIRECTOR'&&isUnifiedSchema_())routingKey='BGD::DIRECTOR';
+      else if(d.assignmentKey&&available.some(function(a){return a.key===d.assignmentKey;}))routingKey=d.assignmentKey;
+      else if(available.length===1)routingKey=available[0].key;
+      else if(available.length>1)
+        throw fail_('BAD_REQUEST','Vui lòng chọn Phòng/Khu cho nhiệm vụ KPI này trước khi xác nhận hoàn thành.');
+    }
+    // The optional assignment from the completion dialog may ONLY resolve a legacy task.
+    if(isKpi&&legacy&&d.assignmentKey&&routingKey!==d.assignmentKey&&roleKind_(info.role)!=='DIRECTOR')
+      throw fail_('BAD_REQUEST','Phòng/Khu được chọn không hợp lệ. Vui lòng tải lại danh sách.');
+    var route=isKpi?routeForTask_(ss,info,{assignmentKey:routingKey}):null;
     var manager=route?{email:route.email,name:route.name}:null;
     prepareCancellation_(p,target);target.deleted=true;bumpRevision_(p);
     if(target.source==='icpv'&&target.sourceKey&&p.deletedSourceKeys.indexOf(target.sourceKey)===-1)
       p.deletedSourceKeys.push(target.sourceKey);
     var completionId='';
-    if(isKpi&&(manager||target.workType==='kpi')){
+    if(isKpi&&!isTopHead&&(routingV2_()||manager||target.workType==='kpi')){
       completionId=Utilities.getUuid();
       // Durable even when the administrator has not configured a valid approver.
       p.completionOutbox.push({id:completionId,from:info.name,title:target.title.slice(0,90),
-        at:new Date().toISOString(),assignmentKey:target.assignmentKey||'',
+        at:new Date().toISOString(),assignmentKey:routingKey,
         unit:route?route.unit:info.unit,unitName:route?route.unitName:'',
         routePending:!manager,managerEmail:manager?manager.email:''});
     }
@@ -1052,9 +1116,10 @@ function runAction_(req){
       catch(err){console.error('Manager delivery:',err.message||err);}}
     var out=publicView_(p,info,req.actor.externalId);
     out.notice=!completed?(d.mode==='discard'?'Đã xóa công việc nhập nhầm.':'Đã xóa công việc.'):!isKpi?
-       'Đã hoàn thành công việc cá nhân. Không gửi thông báo chấm điểm.':manager?
+       'Đã hoàn thành công việc cá nhân. Không gửi thông báo chấm điểm.':isTopHead?
+       'Đã ghi nhận hoàn thành KPI của Giám đốc; chưa thiết lập tuyến nhắc chấm lên cấp trên.':manager?
       (deliveredToManager?'Đã chuyển thông báo chờ người quản lý xem xét.':'Đã ghi nhận hoàn thành KPI; thông báo đang chờ chuyển đến người quản lý.'):
-       (target.workType==='kpi'?'Đã ghi nhận hoàn thành KPI; chưa xác định được người chấm điểm. Sự kiện được lưu để xử lý.':'Đã xóa công việc. Chưa có Trưởng phòng được cấu hình để nhận thông báo.');
+       (routingV2_()||target.workType==='kpi'?'Đã ghi nhận hoàn thành KPI; chưa xác định được người chấm điểm. Sự kiện được lưu để xử lý.':'Đã xóa công việc. Chưa có Trưởng phòng được cấu hình để nhận thông báo.');
     return {view:out,sync:true,urgentSync:urgentCancel,changed:true,managerPushEmail:deliveredToManager?manager.email:'',
       pendingDelivery:manager&&completionId&&!deliveredToManager?{
         sourceRow:item.row,sourceEmail:info.email,recipientEmail:manager.email,completionId:completionId}:null,

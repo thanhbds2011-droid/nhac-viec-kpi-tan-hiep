@@ -96,11 +96,11 @@ test('YC-033: màn hình mới vẫn theo bản V1.9.0, thêm fallback viewport 
   assert.match(css,/min-height:100vh;min-height:100dvh/);
   assert.match(css,/dialog\.compat-dialog-open/);
   assert.match(css,/@media\(max-width:720px\)/);
-  assert.match(html,/\/styles\.css\?v=1\.9\.2-hf3/);
-  assert.match(html,/\/app\.js\?v=1\.9\.2-hf3/);
-  assert.match(html,/Phiên bản 1\.9\.2-HF3/);
+  assert.match(html,/\/styles\.css\?v=1\.9\.3/);
+  assert.match(html,/\/app\.js\?v=1\.9\.3/);
+  assert.match(html,/Phiên bản 1\.9\.3/);
   const pkg=JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8'));
-  assert.equal(pkg.version,'1.9.2-hf3');
+  assert.equal(pkg.version,'1.9.3');
 });
 
 test('YC-033: OneSignal worker, các API không sửa và Extension giữ baseline; api/data.js đổi có kiểm thử YC-035',()=>{
@@ -108,7 +108,7 @@ test('YC-033: OneSignal worker, các API không sửa và Extension giữ baseli
   // SHA-256 of unchanged baseline files in the source ZIP V1.9.0.
   const sha={
     'api/realtime.js':'65de03810884bce2e3a462b1ca1f582a6c928a62dca6a1759a69da77fbd65ac2',
-    'api/config.js':'54421ff79a21f6f04a6a2a47f307d08c1794682376d083105844cd1ebeaa2ac3',
+    'api/config.js':'48ce2616c19e762664dbda7a9c10099515c7f5faf5154ecfc12695ff36487fd8',
     'public/OneSignalSDKWorker.js':'6b27ed7a2672ed900351d4d67b6693e3dc943ca6eff4767dc6a257b9df736dbe',
     'chrome-extension/background.js':'2f933f581e1023cde70dade4f48b6a67b6136e91dead4eb7340b88d6f7a1ced3'
   };

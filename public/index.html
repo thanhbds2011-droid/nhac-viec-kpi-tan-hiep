@@ -13,10 +13,10 @@
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
-  <link rel="stylesheet" href="/styles.css?v=1.9.2-hf3" />
+  <link rel="stylesheet" href="/styles.css?v=1.9.3" />
   <script defer src="https://accounts.google.com/gsi/client"></script>
   <script defer src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js"></script>
-  <script defer src="/app.js?v=1.9.2-hf3"></script>
+  <script defer src="/app.js?v=1.9.3"></script>
 </head>
 <body>
 <div class="shell">
@@ -122,7 +122,7 @@
             <div><strong id="profileName">Viên chức</strong><p id="profileEmail"></p></div></div>
           <button type="button" class="menu-row" id="profileDefaultTime">⚙️ <span>Thay đổi giờ mặc định</span><span>›</span></button>
           <button type="button" id="adminShortcut" class="menu-row hide">📊 <span>Tổng quan quản trị</span><span>›</span></button>
-          <p class="profile-version">Phiên bản 1.9.2-HF3 · Nhắc việc KPI – Tân Hiệp</p>
+          <p class="profile-version">Phiên bản 1.9.3 · Nhắc việc KPI – Tân Hiệp</p>
           <button type="button" class="profile-signout" id="profileSignout">Đăng xuất</button>
           <p class="install-help" id="installHelp">iPhone: Trong Safari, chọn Chia sẻ → Thêm vào Màn hình chính. Android: chọn Cài đặt ứng dụng / Thêm vào Màn hình chính.</p>
         </section>
@@ -156,6 +156,9 @@
 </div></dialog>
 <dialog id="confirmDialog" aria-labelledby="confirmHeading"><form method="dialog" class="dialog-inner">
   <h3 id="confirmHeading">Xóa công việc?</h3><p id="confirmText"></p>
+  <label id="completionAssignmentWrap" class="hide">Phòng/Khu của nhiệm vụ KPI
+    <select id="completionAssignment" aria-label="Phòng/Khu của nhiệm vụ KPI"></select>
+  </label>
   <div class="dialog-actions"><button type="submit" value="cancel" class="secondary">Giữ lại</button>
     <button type="submit" value="discard" class="secondary">Xóa do nhập nhầm</button><button type="submit" value="confirm" class="danger">Đã hoàn thành, xóa</button></div>
 </form></dialog>

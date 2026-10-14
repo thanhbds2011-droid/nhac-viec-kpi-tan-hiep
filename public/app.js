@@ -1,4 +1,35 @@
 'use strict';
+// Version 1.9.3: checking updates is separate from task/realtime revision.
+const APP_VERSION='1.9.3';
+let versionCheckTimer=null;
+let versionPending='';
+let versionUpdateInProgress=false;
+function hasUnsavedUserWork(){
+  if(state.busy||state.signingOut||state.editingId||pendingImport)return true;
+  const title=$('taskTitle'),due=$('dueDate'),dialog=$('confirmDialog');
+  return Boolean((title&&title.value.trim())||(due&&due.value)||
+    (dialog&&dialog.hasAttribute('open'))||
+    ($('importDialog')&&$('importDialog').hasAttribute('open')));
+}
+function applyPendingVersion(){
+  if(!versionPending||versionUpdateInProgress||hasUnsavedUserWork())return false;
+  versionUpdateInProgress=true;
+  // Unique HTML URL prevents stale app-shell caches. Existing OneSignal worker is untouched.
+  location.replace('/?appVersion='+encodeURIComponent(versionPending));
+  return true;
+}
+async function checkAppVersion(){
+  if(versionUpdateInProgress||document.hidden||!navigator.onLine)return;
+  try{
+    const res=await fetch('/api/config?versionCheck='+Date.now(),{cache:'no-store'});
+    if(!res.ok)return;
+    const cfg=await res.json(),next=String(cfg.appVersion||'');
+    if(!next||next===APP_VERSION){versionPending='';return;}
+    versionPending=next;
+    if(!applyPendingVersion()&&!versionUpdateInProgress)
+      notify('Có phiên bản mới. Hãy lưu hoặc hoàn tất thao tác đang làm; ứng dụng sẽ tự cập nhật.',false);
+  }catch(_){/* Offline should not interrupt work or push notifications. */}
+}
 // YC-033: Safari/iOS versions before 14 may not implement replaceChildren.
 // Every call in this application clears a container; do not introduce a dependency.
 if(typeof Element!=='undefined'&&!Element.prototype.replaceChildren){
@@ -209,7 +240,9 @@ function renderSchedule(){
 }
 function renderAssignmentOptions(selected=''){
   const select=$('taskAssignment');select.replaceChildren();
-  const needs=$('taskType').value==='kpi'&&state.routingEnabled;
+  const prior=state.editingId&&state.tasks.find(t=>t.id===state.editingId);
+  const historicalWithoutAssignment=!!(prior&&prior.legacyKpi&&!prior.assignmentKey);
+  const needs=$('taskType').value==='kpi'&&state.routingEnabled&&!historicalWithoutAssignment;
   const multiple=state.assignments.length>1;
   $('assignmentField').classList.toggle('hide',!needs||!multiple);
   if(!needs)return;
@@ -219,6 +252,8 @@ function renderAssignmentOptions(selected=''){
   select.value=selected||(!multiple&&state.assignments.length===1?state.assignments[0].key:'');
 }
 function selectedAssignment(){
+  const prior=state.editingId&&state.tasks.find(t=>t.id===state.editingId);
+  if(prior&&prior.legacyKpi&&!prior.assignmentKey)return ''; // No migration to edit the due date.
   return $('taskType').value==='kpi'&&state.routingEnabled?$('taskAssignment').value:'';
 }
 function appendImportAssignment(content,original){
@@ -237,9 +272,9 @@ function edit(t){
   state.editingId=t.id;$('taskTitle').value=t.title;$('dueDate').value=t.dueDate;
   $('dueDate').min=''; // Previously registered due dates are visible; server validates on save.
   $('taskTime').value=t.time;
-  $('taskType').querySelector('option[value=legacy]').hidden=(t.workType||'legacy')!=='legacy';
-  $('taskType').querySelector('option[value=personal]').disabled=!!t.sourceKey;
-  $('taskType').value=t.workType||'legacy';
+  $('taskType').querySelector('option[value=legacy]').hidden=true;
+  $('taskType').querySelector('option[value=personal]').disabled=!!t.sourceKey||!!t.legacyKpi;
+  $('taskType').value=t.workType==='personal'?'personal':'kpi';
   renderAssignmentOptions(t.assignmentKey||'');
   $('formHeading').textContent='Sửa công việc';
   $('saveTask').textContent='Cập nhật';$('cancelEdit').classList.remove('hide');
@@ -451,7 +486,7 @@ async function optimisticMutation(action,data,change){
       syncIndicator('Chưa xác minh được · Làm mới khi có mạng');
       notify(err.message+' Chưa xác nhận kết quả; hãy Làm mới khi có mạng.',true);
     }
-  }finally{setBusy(false);flushChanges();
+  }finally{setBusy(false);flushChanges();applyPendingVersion();
     if(state.reconcileAfterBusy){state.reconcileAfterBusy=false;void checkRevision(true);}
   }
 }
@@ -459,7 +494,9 @@ async function saveTask(ev){
   ev.preventDefault();if(state.busy)return;
   const title=$('taskTitle').value.trim(),dueDate=$('dueDate').value,time=$('taskTime').value,id=state.editingId||'';
   const workType=$('taskType').value,assignmentKey=selectedAssignment();
-  if(workType==='kpi'&&state.routingEnabled&&!assignmentKey){notify('Hãy chọn Phòng/Khu và chức vụ cho công việc KPI.',true);return;}
+  const original=state.editingId&&state.tasks.find(t=>t.id===state.editingId);
+  const historicalEdit=!!(original&&original.legacyKpi&&!original.assignmentKey);
+  if(workType==='kpi'&&state.routingEnabled&&!assignmentKey&&!historicalEdit){notify('Hãy chọn Phòng/Khu và chức vụ cho công việc KPI.',true);return;}
   if(!title||!dueDate||!time){notify('Hãy nhập tên, ngày đến hạn và giờ nhắc.',true);return;}
   const temporary=id||'pending-'+Date.now();
   await optimisticMutation('save',{id,title,dueDate,time,workType,assignmentKey},()=>{
@@ -493,9 +530,13 @@ function wireLegacyDialogs(){
   const confirm=$('confirmDialog');
   confirm.querySelectorAll('button[value]').forEach(button=>button.addEventListener('click',event=>{
     if(!confirm.classList.contains('compat-dialog-open'))return;
+    if(button.value==='confirm'&&!$('completionAssignmentWrap').classList.contains('hide')&&
+       !$('completionAssignment').value){event.preventDefault();notify('Hãy chọn Phòng/Khu của nhiệm vụ KPI.',true);return;}
     event.preventDefault();closeAppDialog(confirm,button.value);
   }));
   confirm.querySelector('form').addEventListener('submit',event=>{
+    if(event.submitter?.value==='confirm'&&!$('completionAssignmentWrap').classList.contains('hide')&&
+       !$('completionAssignment').value){event.preventDefault();notify('Hãy chọn Phòng/Khu của nhiệm vụ KPI.',true);return;}
     if(confirm.classList.contains('compat-dialog-open'))event.preventDefault();
   });
   document.addEventListener('keydown',event=>{
@@ -514,16 +555,30 @@ function openTaskMenu(t){
 }
 async function remove(t){
   if(state.busy)return;
-  $('confirmText').textContent=(t.workType==='legacy'&&state.routingEnabled)?
-    `“${t.title}” là công việc cũ chưa phân loại. Hãy sửa và chọn KPI hoặc Cá nhân trước khi xác nhận hoàn thành; vẫn có thể xóa nếu nhập nhầm.`:t.workType==='personal'?
+  $('confirmText').textContent=t.workType==='personal'?
     `Bạn đã hoàn thành công việc cá nhân “${t.title}”? Không gửi thông báo chấm KPI.`:state.managerConfigured?
-    `Bạn đã hoàn thành “${t.title}” trên iCPV? Trưởng phòng sẽ được thông báo để chấm điểm.`:
+    `Bạn đã hoàn thành KPI “${t.title}” trên iCPV? Hệ thống sẽ nhắc người có thẩm quyền vào chấm điểm theo phân công hợp lệ.`:
     `Bạn đã hoàn thành “${t.title}”? Chưa có thông tin Trưởng phòng nhận thông báo; hãy liên hệ quản trị viên.`;
+  const needsAssignment=t.workType!=='personal'&&state.routingEnabled&&t.legacyKpi&&
+    !t.assignmentKey&&state.assignments.length>1;
+  const wrap=$('completionAssignmentWrap'),selector=$('completionAssignment');
+  wrap.classList.toggle('hide',!needsAssignment);
+  selector.replaceChildren();
+  if(needsAssignment){
+    const placeholder=document.createElement('option');placeholder.value='';placeholder.textContent='Chọn Phòng/Khu';selector.append(placeholder);
+    for(const assignment of state.assignments){
+      const o=document.createElement('option');o.value=assignment.key;o.textContent=assignment.unitName+' – '+assignment.label;selector.append(o);
+    }
+  }
   const dialog=$('confirmDialog');openAppDialog(dialog);
   dialog.addEventListener('close',function onClose(){
     dialog.removeEventListener('close',onClose);
-    if(!['confirm','discard'].includes(dialog.returnValue)||state.busy)return;
-    void optimisticMutation('remove',{id:t.id,mode:dialog.returnValue==='discard'?'discard':'completed'},
+    if(!['confirm','discard'].includes(dialog.returnValue)||state.busy){applyPendingVersion();return;}
+    if(dialog.returnValue==='confirm'&&needsAssignment&&!selector.value){
+      notify('Vui lòng chọn Phòng/Khu tương ứng với nhiệm vụ KPI.',true);return;
+    }
+    void optimisticMutation('remove',{id:t.id,mode:dialog.returnValue==='discard'?'discard':'completed',
+      assignmentKey:dialog.returnValue==='confirm'&&needsAssignment?selector.value:''},
       ()=>{state.tasks=state.tasks.filter(x=>x.id!==t.id);});
   },{once:true});
 }
@@ -759,16 +814,16 @@ function setFilter(name){
 async function start(){
   wireLegacyDialogs();
   window.addEventListener('message',receiveImportFromExtension);
-  $('importCancel').addEventListener('click',()=>{pendingImport=null;closeAppDialog($('importDialog'));});
+  $('importCancel').addEventListener('click',()=>{pendingImport=null;closeAppDialog($('importDialog'));applyPendingVersion();});
   $('importApply').addEventListener('click',()=>void confirmImport());
   Object.entries(NAV_IDS).forEach(([pane,id])=>$(id).addEventListener('click',()=>showPane(pane,true)));
   $('tabCreate').addEventListener('click',()=>{resetForm();showPane('create',true);});
   $('taskForm').addEventListener('submit',saveTask);
   $('dueDate').addEventListener('change',preview);$('taskTime').addEventListener('change',preview);
   $('taskType').addEventListener('change',()=>renderAssignmentOptions(''));
-  $('cancelEdit').addEventListener('click',()=>{resetForm();showPane('list',true);});
-  $('backToList').addEventListener('click',()=>{resetForm();showPane('list',true);});
-  $('formCancel').addEventListener('click',()=>{resetForm();showPane('list',true);});
+  $('cancelEdit').addEventListener('click',()=>{resetForm();showPane('list',true);applyPendingVersion();});
+  $('backToList').addEventListener('click',()=>{resetForm();showPane('list',true);applyPendingVersion();});
+  $('formCancel').addEventListener('click',()=>{resetForm();showPane('list',true);applyPendingVersion();});
   $('reloadBtn').addEventListener('click',refresh);
   $('saveDefaultTime').addEventListener('click',saveDefaultTime);
   $('enablePush').addEventListener('click',enablePush);
@@ -782,7 +837,9 @@ async function start(){
   $('headerProfileBtn').addEventListener('click',()=>showPane('profile',true));
   $('adminShortcut').addEventListener('click',()=>showPane('admin',true));
   $('adminBack').addEventListener('click',()=>showPane('profile',true));
-  document.addEventListener('visibilitychange',()=>{if(!document.hidden)void checkRevision();});
+  document.addEventListener('visibilitychange',()=>{
+    if(!document.hidden){void checkRevision();void checkAppVersion();}
+  });
   window.addEventListener('storage',event=>{
     if(!state.user||!state.localRevisionKey||event.key!==state.localRevisionKey||!event.newValue)return;
     try{
@@ -792,7 +849,11 @@ async function start(){
       void checkRevision(true); // Always verify actual state from authenticated server.
     }catch(_){}
   });
-  window.addEventListener('online',()=>{syncIndicator('Đã có mạng · Đang kiểm tra…');void checkRevision(true);});
+  window.addEventListener('online',()=>{
+    syncIndicator('Đã có mạng · Đang kiểm tra…');void checkRevision(true);void checkAppVersion();
+  });
+  // Checks occur only while the page is active. 2 minutes is adequate for staggered devices.
+  if(!versionCheckTimer)versionCheckTimer=setInterval(()=>void checkAppVersion(),120000);
   $('menuClose').addEventListener('click',()=>closeAppDialog($('taskMenu')));
   document.querySelectorAll('[data-filter]').forEach(button=>button.addEventListener('click',()=>setFilter(button.dataset.filter)));
   resetForm();showPane('list');
@@ -808,6 +869,10 @@ async function start(){
     const response=await fetch('/api/config',{cache:'no-store'}),cfg=await response.json();
     if(!response.ok)throw new Error(cfg.error||'Chưa cài cấu hình Vercel.');
     state.config=cfg;
+    if(cfg.appVersion&&cfg.appVersion!==APP_VERSION){
+      versionPending=cfg.appVersion;
+      if(applyPendingVersion())return;
+    }
     for(let i=0;i<80&&!window.google?.accounts?.id;i++)await new Promise(resolve=>setTimeout(resolve,100));
     if(!window.google?.accounts?.id)throw new Error('Không tải được Google Login. Hãy kiểm tra kết nối mạng.');
     window.google.accounts.id.initialize({client_id:cfg.googleClientId,callback:signedIn,auto_select:false});

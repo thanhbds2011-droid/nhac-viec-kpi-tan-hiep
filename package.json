@@ -1,8 +1,8 @@
 {
   "name": "nhac-viec-kpi-tan-hiep",
-  "version": "1.9.2-hf3",
+  "version": "1.9.3",
   "private": true,
-  "description": "Nhắc việc KPI Tân Hiệp – V1.9.2-HF3: YC-035 Push chuyển tài khoản và menu Sheets tinh gọn, giữ nguyên YC-034",
+  "description": "Nhắc việc KPI Tân Hiệp – V1.9.3: YC-036, YC-037, YC-038; giữ nguyên các luồng khác",
   "type": "commonjs",
   "engines": {
     "node": ">=20"

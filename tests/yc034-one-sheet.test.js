@@ -84,9 +84,11 @@ test('YC-034: BGD Giám đốc thuộc BGD phụ trách TCHC/KHTC không cần v
   assert.ok(a.assignments.some(x=>x.key==='TCHC::VICE'));
   assert.ok(a.assignments.some(x=>x.key==='KHTC::ACTING'));
   const d=h.run('d@example.com','load').view;
-  assert.ok(d.assignments.some(x=>x.key==='TCHC::DIRECTOR'));
-  assert.ok(d.assignments.some(x=>x.key==='KHTC::DIRECTOR'));
-  assert.equal(d.assignments.some(x=>x.key.startsWith('BGD::')),false);
+  assert.equal(d.assignments.map(x=>x.key).join(','),'BGD::DIRECTOR');
+  // The Director's department-level authority is still available to the routing catalog.
+  const catalog=h.c.assignmentCatalog_(h.c.book_());
+  assert.ok(catalog.assignments['d@example.com'].some(x=>x.key==='TCHC::DIRECTOR'));
+  assert.ok(catalog.assignments['d@example.com'].some(x=>x.key==='KHTC::DIRECTOR'));
 });
 test('YC-034: một Phó phòng A kiêm Quyền phòng B; nhận thông báo đúng từng nhiệm vụ',()=>{
   const h=setup();h.run('b@example.com','load');h.run('d@example.com','load');h.run('a@example.com','load');
@@ -154,4 +156,112 @@ test('YC-034: tạo tab nháp một lần từ dữ liệu cũ, không viết đ
   assert.equal(h.sheets.get('Nhân sự - Phân quyền').rows[0][0],'Email đăng nhập');
   assert.equal(h.c.validateUnifiedAdminSheet().ok,true);
   assert.throws(()=>h.c.prepareUnifiedAdminSheet(),/Đã có tab/);
+});
+
+test('YC-037: Giám đốc và Phó Giám đốc đều trực tiếp phụ trách Phòng/Khu, Phó Giám đốc → Giám đốc',()=>{
+  const h=setup(),sh=h.sheets.get('Nhân sự - Phân quyền');
+  sh.rows[4][5]='KHTC';  // Giám đốc phụ trách KHTC.
+  sh.rows[5][5]='TCHC';  // Phó Giám đốc phụ trách TCHC.
+  const valid=h.c.validateUnifiedAdminSheet();assert.equal(valid.ok,true,valid.errors.join(' | '));
+  h.run('d@example.com','load');h.run('e@example.com','load');
+  const headTask=h.add('b@example.com','kpi','TCHC::MANAGER','Báo cáo Phòng TCHC');
+  h.run('b@example.com','remove',{id:headTask,mode:'completed'});
+  assert.equal(h.state('e@example.com').inbox.length,1);
+  assert.equal(h.state('d@example.com').inbox.length,0);
+  const deputy=h.add('e@example.com','kpi','BGD::DIRECTOR','KPI riêng Phó Giám đốc');
+  h.run('e@example.com','remove',{id:deputy,mode:'completed'});
+  assert.equal(h.state('d@example.com').inbox.length,1);
+  assert.equal(h.state('d@example.com').inbox[0].unit,'BGD');
+  const acting=h.add('a@example.com','kpi','KHTC::ACTING','KPI Khu thuộc Giám đốc');
+  h.run('a@example.com','remove',{id:acting,mode:'completed'});
+  assert.equal(h.state('d@example.com').inbox.length,2);
+});
+
+test('YC-037: trùng lãnh đạo BGD phụ trách 1 phòng cảnh báo; không gửi nhầm',()=>{
+  const h=setup(),sh=h.sheets.get('Nhân sự - Phân quyền');
+  sh.rows[5][5]='TCHC';
+  const val=h.c.validateUnifiedAdminSheet();
+  assert.equal(val.ok,false);assert.match(val.errors.join(' | '),/TCHC/);
+  h.run('d@example.com','load');h.run('e@example.com','load');
+  const id=h.add('b@example.com','kpi','TCHC::MANAGER','KPI trùng quản lý');
+  h.run('b@example.com','remove',{id,mode:'completed'});
+  assert.equal(h.state('d@example.com').inbox.length,0);
+  assert.equal(h.state('e@example.com').inbox.length,0);
+  assert.equal(h.state('b@example.com').completionOutbox.length,1);
+});
+
+test('YC-037: chức danh Ban Giám đốc chung không suy đoán là Giám đốc',()=>{
+  const h=setup(),sh=h.sheets.get('Nhân sự - Phân quyền');
+  sh.rows[4][3]='Ban Giám đốc';
+  const val=h.c.validateUnifiedAdminSheet();
+  assert.equal(val.ok,true);assert.match(val.warnings.join(' | '),/ghi rõ/);
+  h.run('d@example.com','load');
+  const id=h.add('e@example.com','kpi','BGD::DIRECTOR','Công việc P.GĐ');
+  const result=h.run('e@example.com','remove',{id,mode:'completed'});
+  assert.match(result.view.notice,/chưa xác định/);
+  assert.equal(h.state('e@example.com').completionOutbox.length,1);
+  assert.equal(h.state('d@example.com').inbox.length,0);
+});
+
+test('YC-036/038: việc cũ không ghi đè State khi load, client cũ thiếu mode bị chặn',()=>{
+  const h=setup();h.run('d@example.com','load');
+  const id=h.add('c@example.com','kpi','KHTC::EMPLOYEE','Công việc lịch sử');
+  const old=h.state('c@example.com');const task=old.tasks.find(t=>t.id===id);
+  delete task.workType;delete task.assignmentKey;
+  const slotIDs=JSON.stringify(task.slots);
+  const row=h.sheets.get('State').rows.find(r=>r[1]==='c@example.com');row[2]=JSON.stringify(old);
+  const loaded=h.run('c@example.com','load').view.tasks.find(t=>t.id===id);
+  assert.equal(loaded.workType,'kpi');assert.equal(loaded.legacyKpi,true);
+  assert.equal(JSON.stringify(h.state('c@example.com').tasks.find(t=>t.id===id).slots),slotIDs);
+  assert.throws(()=>h.run('c@example.com','remove',{id}),/Phiên bản ứng dụng đã cũ/);
+  assert.equal(h.state('c@example.com').tasks.find(t=>t.id===id).deleted,false);
+  h.run('a@example.com','load');
+  h.run('c@example.com','remove',{id,mode:'completed'});
+  assert.equal(h.state('a@example.com').inbox.length,1);
+  assert.equal(h.state('c@example.com').completionOutbox.length,0);
+});
+
+test('YC-036: không lấy nhầm nhiệm vụ lịch sử người kiêm nhiệm nhiều vai trò',()=>{
+  const h=setup();h.run('b@example.com','load');
+  const id=h.add('a@example.com','kpi','TCHC::VICE','Nhiệm vụ thiếu phân công');
+  const state=h.state('a@example.com');const task=state.tasks.find(x=>x.id===id);
+  delete task.assignmentKey;delete task.workType;
+  h.sheets.get('State').rows.find(x=>x[1]==='a@example.com')[2]=JSON.stringify(state);
+  assert.throws(()=>h.run('a@example.com','remove',{id,mode:'completed'}),/chọn Phòng\/Khu/);
+  assert.equal(h.state('a@example.com').tasks.find(x=>x.id===id).deleted,false);
+  h.run('a@example.com','remove',{id,mode:'completed',assignmentKey:'TCHC::VICE'});
+  assert.equal(h.state('b@example.com').inbox.length,1);
+});
+
+test('YC-036: sửa giờ của công việc lịch sử không ép chọn loại hoặc Phòng/Khu',()=>{
+  const h=setup();
+  const id=h.add('a@example.com','kpi','TCHC::VICE','Sổ công việc lịch sử');
+  const profile=h.state('a@example.com');const oldTask=profile.tasks.find(t=>t.id===id);
+  delete oldTask.workType;delete oldTask.assignmentKey;
+  h.sheets.get('State').rows.find(r=>r[1]==='a@example.com')[2]=JSON.stringify(profile);
+  const changed=h.run('a@example.com','save',{id,title:'Sổ công việc lịch sử',dueDate:'2027-01-15',time:'08:30',workType:'kpi'});
+  assert.equal(changed.view.tasks.find(t=>t.id===id).workType,'kpi');
+  assert.equal(changed.view.tasks.find(t=>t.id===id).legacyKpi,true);
+  assert.equal(h.state('a@example.com').tasks.find(t=>t.id===id).assignmentKey,'');
+  assert.throws(()=>h.run('a@example.com','save',{id,title:'Sổ công việc lịch sử',dueDate:'2027-01-15',time:'08:30',workType:'personal'}),/lịch sử là KPI/);
+});
+
+test('YC-037: Phó Giám đốc hoàn thành KPI cũ mang key Phòng/Khu vẫn lên Giám đốc',()=>{
+  const h=setup(),sh=h.sheets.get('Nhân sự - Phân quyền');
+  sh.rows[5][5]='TCHC';sh.rows[4][5]='KHTC';
+  h.run('d@example.com','load');
+  const id=h.add('e@example.com','kpi','BGD::DIRECTOR','Việc KPI Phó Giám đốc đã đăng ký');
+  const p=h.state('e@example.com');p.tasks.find(t=>t.id===id).assignmentKey='TCHC::DIRECTOR';
+  h.sheets.get('State').rows.find(r=>r[1]==='e@example.com')[2]=JSON.stringify(p);
+  h.run('e@example.com','remove',{id,mode:'completed'});
+  assert.equal(h.state('d@example.com').inbox.length,1);
+});
+
+test('YC-037: Giám đốc hoàn thành KPI riêng không tự chọn người chấm cấp trên',()=>{
+  const h=setup();
+  const id=h.add('d@example.com','kpi','BGD::DIRECTOR','KPI Giám đốc');
+  const result=h.run('d@example.com','remove',{id,mode:'completed'});
+  assert.match(result.view.notice,/chưa thiết lập tuyến nhắc/);
+  assert.equal(h.state('d@example.com').completionOutbox.length,0);
+  assert.equal(h.state('d@example.com').tasks.find(x=>x.id===id).deleted,true);
 });

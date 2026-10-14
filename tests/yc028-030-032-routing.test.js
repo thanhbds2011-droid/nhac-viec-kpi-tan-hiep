@@ -140,11 +140,16 @@ test('YC-028: không có lãnh đạo hợp lệ, lưu sự kiện KPI nhưng kh
   assert.equal(h.state('b@example.com').completionOutbox.length,1);
 });
 
-test('YC-030: legacy không có workType giữ luồng V1.8; client mới chọn cá nhân',()=>{
+test('YC-036: V2 từ chối client tạo việc không phân loại; việc lịch sử chỉ diễn giải là KPI',()=>{
   const h=setup();
-  // In V2, legacy task keeps legacy routing without automatic migration.
-  const old=h.run('a@example.com','save',{title:'Việc cũ',dueDate:'2027-01-15',time:'07:30'}).view.tasks[0];
-  assert.equal(old.workType,'legacy');
+  assert.throws(()=>h.run('a@example.com','save',{title:'Việc mới bản cũ',dueDate:'2027-01-15',time:'07:30'}),/Phiên bản ứng dụng đã cũ/);
+  const job=h.add('a@example.com','kpi','TCHC::VICE','Việc lịch sử');
+  const profile=h.state('a@example.com');const task=profile.tasks.find(x=>x.id===job);
+  delete task.workType;delete task.assignmentKey;
+  const row=h.ss.get('State').rows.find(x=>x[1]==='a@example.com');row[2]=JSON.stringify(profile);
+  const view=h.run('a@example.com','load').view.tasks.find(x=>x.id===job);
+  assert.equal(view.workType,'kpi');assert.equal(view.legacyKpi,true);
+  assert.equal(h.state('a@example.com').tasks.find(x=>x.id===job).workType,undefined);
   const personal=h.add('a@example.com','personal','','Việc mới');
   assert.equal(h.state('a@example.com').tasks.find(t=>t.id===personal).workType,'personal');
 });
@@ -205,14 +210,19 @@ test('YC-028: sau rollback V2, nhiệm vụ có mã phân công không bị gử
   assert.equal(h.state('a@example.com').completionOutbox.length,1);
 });
 
-test('YC-030: sau kích hoạt V2, công việc chưa phân loại phải chọn trước khi hoàn thành, dữ liệu không mất',()=>{
-  const h=setup();
-  const old=h.run('a@example.com','save',{title:'Nhiệm vụ trước nâng cấp',dueDate:'2027-01-15',time:'07:30'}).view.tasks[0];
-  assert.throws(()=>h.completion('a@example.com',old.id),/chưa phân loại/);
-  assert.equal(h.state('a@example.com').tasks.find(t=>t.id===old.id).deleted,false);
-  h.run('a@example.com','save',{id:old.id,title:old.title,dueDate:old.dueDate,time:old.time,workType:'personal'});
-  const done=h.completion('a@example.com',old.id);
-  assert.match(done.view.notice,/cá nhân/);
+test('YC-036: việc lịch sử V2 giữ dữ liệu, hoàn thành tự gửi người chấm đúng thẩm quyền',()=>{
+  const h=setup();h.run('b@example.com','load');
+  const id=h.add('a@example.com','kpi','TCHC::VICE','Nhiệm vụ trước nâng cấp');
+  const profile=h.state('a@example.com');let task=profile.tasks.find(t=>t.id===id);
+  const slots=JSON.stringify(task.slots);delete task.workType;delete task.assignmentKey;
+  h.ss.get('State').rows.find(r=>r[1]==='a@example.com')[2]=JSON.stringify(profile);
+  assert.equal(h.run('a@example.com','load').view.tasks.find(t=>t.id===id).workType,'kpi');
+  assert.equal(JSON.stringify(h.state('a@example.com').tasks.find(t=>t.id===id).slots),slots);
+  // The user has two positions: must confirm the correct one at completion.
+  assert.throws(()=>h.completion('a@example.com',id),/chọn Phòng\/Khu/);
+  h.run('a@example.com','remove',{id,mode:'completed',assignmentKey:'TCHC::VICE'});
+  assert.equal(h.state('b@example.com').inbox.length,1);
+  assert.equal(h.state('b@example.com').inbox[0].title,'Nhiệm vụ trước nâng cấp');
 });
 
 test('YC-032: trigger khôi phục sự kiện hoàn thành đang chờ, không cần lãnh đạo mở ứng dụng lại',()=>{
