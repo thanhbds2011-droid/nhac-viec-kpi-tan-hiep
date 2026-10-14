@@ -2,7 +2,7 @@
   "name": "nhac-viec-kpi-tan-hiep",
   "version": "1.9.2",
   "private": true,
-  "description": "Nhắc việc KPI Tân Hiệp: V1.9.2-HF1 hotfix YC-028: BGD là nhóm lãnh đạo; cấu hình người phụ trách từ Google Sheets cột G. Giữ YC-030/032/033",
+  "description": "Nhắc việc KPI Tân Hiệp – V1.9.2-HF2 YC-034: một tab Nhân sự - Phân quyền, bảo toàn dữ liệu và luồng YC-028/030/032/033",
   "type": "commonjs",
   "engines": {
     "node": ">=20"

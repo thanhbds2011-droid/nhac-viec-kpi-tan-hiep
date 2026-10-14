@@ -1,6 +1,6 @@
 /**
- * NHẮC VIỆC KPI – TÂN HIỆP | production v1.8.0
- * Google Sheets Access/State unchanged. Single OneSignal application.
+ * NHẮC VIỆC KPI – TÂN HIỆP | V1.9.2-HF2 / YC-034
+ * Single editable administrator tab, old account tabs and State preserved. Single OneSignal application.
  * Never call OneSignal while holding the shared script lock.
  * Durable claim + idempotency key protects concurrent edits and uncertain responses.
  * Time zone: Asia/Ho_Chi_Minh.
@@ -10,6 +10,10 @@ var SHEET_USERS='Tài khoản';
 var SHEET_DEPARTMENTS='Quản lý Phòng-Khu'; // Không dùng dấu / trong tên tab.
 var SHEET_STATE='State';
 var SHEET_KPI_ASSIGNMENTS='Phân công KPI';
+var SHEET_UNIFIED='Nhân sự - Phân quyền';
+var UNIFIED_SCHEMA_KEY='ADMIN_UNIFIED_SCHEMA'; // V1: bật bằng quản trị viên sau kiểm tra toàn bộ
+var UNIFIED_HEADERS=['Email đăng nhập','Họ và tên','Trạng thái','Chức danh chính','Đơn vị chính',
+  'Phòng/Khu phụ trách hoặc kiêm nhiệm','Chức danh kiêm nhiệm (nếu khác)','Quyền quản trị'];
 var KPI_ROUTING_KEY='KPI_ROUTING_SCHEMA'; // V2 only after explicit admin validation/activation
 
 var ACCOUNT_SCHEMA_KEY='ACCOUNT_SCHEMA'; // LEGACY / VI; mặc định LEGACY.
@@ -28,13 +32,17 @@ function setupProject() {
     if(!props.getProperty(k))throw new Error('Chưa đặt Script Property: '+k);
   });
   var ss=SpreadsheetApp.openById(props.getProperty('SHEET_ID'));
-  var a=ss.getSheetByName(isVietnameseSchema_()?SHEET_USERS:SHEET_ACCESS);
+  var a=ss.getSheetByName(isUnifiedSchema_()?SHEET_UNIFIED:isVietnameseSchema_()?SHEET_USERS:SHEET_ACCESS);
   if(!a){
+    if(isUnifiedSchema_())throw new Error('Không tìm thấy tab Nhân sự - Phân quyền. Dừng để bảo vệ tài khoản.');
     if(isVietnameseSchema_())throw new Error('Không tìm thấy tab Tài khoản. Không tự tạo bảng mới.');
     a=ss.insertSheet(SHEET_ACCESS); // Giữ tương thích hành vi setupProject v1.5.0 trên hệ thống mới.
   }
   var s=ss.getSheetByName(SHEET_STATE)||ss.insertSheet(SHEET_STATE);
-  if(a.getLastRow()===0)a.appendRow(['Email','Họ tên','Active','Role']);
+  if(a.getLastRow()===0){
+    if(isUnifiedSchema_())throw new Error('Tab quản trị hợp nhất chưa có dữ liệu. Không tự tạo tài khoản.');
+    a.appendRow(['Email','Họ tên','Active','Role']);
+  }
   if(s.getLastRow()===0)s.appendRow(['Google Sub','Email','JSON State','Updated At']);
   a.setFrozenRows(1);s.setFrozenRows(1);
   if(!ScriptApp.getProjectTriggers().some(function(t){return t.getHandlerFunction()==='syncScheduledNotifications';}))
@@ -54,6 +62,7 @@ function configureAdminView_(sheet,widths){
   if(!sheet.getFilter())sheet.getRange(1,1,Math.max(sheet.getLastRow(),2),widths.length).createFilter();
 }
 function prepareVietnameseAdminSheets(){
+  if(isUnifiedSchema_())throw new Error('Đã dùng tab quản trị hợp nhất.');
   if(isVietnameseSchema_())throw new Error('Bảng tiếng Việt đã kích hoạt. Không chuẩn bị lại.');
   var ss=book_(),legacy=ss.getSheetByName(SHEET_ACCESS);
   if(!legacy)throw new Error('Không thấy Access cũ. Dừng chuyển đổi để bảo vệ tài khoản.');
@@ -91,6 +100,7 @@ function prepareVietnameseAdminSheets(){
  * Chạy duy nhất một lần sau khi deploy; gọi lại an toàn.
  */
 function prepareAdminPermissionColumn(){
+  if(isUnifiedSchema_())throw new Error('Cột Quyền quản trị đã nằm trong tab hợp nhất.');
   var ss=book_(),users=ss.getSheetByName(SHEET_USERS);
   if(!users)throw new Error('Chưa có tab Tài khoản. Không tự tạo dữ liệu.');
   var header=String(users.getRange(1,7).getDisplayValue?users.getRange(1,7).getDisplayValue():users.getRange(1,7).getValue()||'').trim();
@@ -123,6 +133,7 @@ function roleLabel_(role){
   return kind==='DIRECTOR'?'Ban Giám đốc':kind==='ACTING'?'Quyền Trưởng phòng/Khu':kind==='MANAGER'?'Trưởng phòng/Khu':kind==='VICE'?'Phó Trưởng phòng/Khu':kind==='ADMIN'?'Quản trị viên':kind==='EMPLOYEE'?'Nhân viên':String(role||'');
 }
 function validateVietnameseAdminSheets(){
+  if(isUnifiedSchema_())return validateUnifiedAdminSheet();
   var ss=book_(),u=ss.getSheetByName(SHEET_USERS),d=ss.getSheetByName(SHEET_DEPARTMENTS),problems=[];
   if(!u||!d)return {ok:false,errors:['Thiếu tab Tài khoản hoặc Quản lý Phòng-Khu. Chạy hàm chuẩn bị trước.']};
   var users=u.getLastRow()>1?u.getRange(2,1,u.getLastRow()-1,7).getDisplayValues():[];
@@ -175,6 +186,7 @@ function validateVietnameseAdminSheets(){
   return {ok:problems.length===0,errors:problems,accounts:Object.keys(byEmail).length,units:Object.keys(byUnit).length};
 }
 function activateVietnameseAdminSheets(){
+  if(isUnifiedSchema_())throw new Error('Đang dùng tab quản trị hợp nhất.');
   return withLock_(function(){
     if(isVietnameseSchema_())return 'Đã sử dụng giao diện tiếng Việt; không cần kích hoạt lại.';
     var ss=book_(),check=validateVietnameseAdminSheets();
@@ -190,6 +202,7 @@ function activateVietnameseAdminSheets(){
   });
 }
 function rollbackVietnameseAdminSheets(){
+  if(isUnifiedSchema_())throw new Error('Trước tiên dùng rollbackUnifiedAdminSheet.');
   return withLock_(function(){
     var ss=book_(),old=ss.getSheetByName(SHEET_ACCESS);
     if(!old)throw new Error('Không tìm thấy Access cũ. Dừng khôi phục.');
@@ -218,7 +231,11 @@ function onOpen(){
     .addItem('7. Kiểm tra phân công KPI','inspectKpiRoutingSheets')
     .addItem('8. Bổ sung lựa chọn chức vụ KPI','prepareKpiRoleDropdowns')
     .addItem('9. Kích hoạt phân công KPI','activateKpiRoutingSheets')
-    .addItem('10. Tắt phân công KPI V2','rollbackKpiRoutingSheets').addToUi();}catch(_e){}
+    .addItem('10. Tắt phân công KPI V2','rollbackKpiRoutingSheets')
+    .addSeparator().addItem('11. Tạo bản nháp quản trị 1 tab','prepareUnifiedAdminSheet')
+    .addItem('12. Kiểm tra tab hợp nhất','inspectUnifiedAdminSheet')
+    .addItem('13. Kích hoạt tab hợp nhất','activateUnifiedAdminSheet')
+    .addItem('14. Khôi phục cấu hình cũ','rollbackUnifiedAdminSheet').addToUi();}catch(_e){}
 }
 
 function jsonOutput_(o){return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON);}
@@ -256,26 +273,188 @@ function roleKind_(role){
   var r=textKey_(role);
   if(['ADMIN','ADMINISTRATOR','QUAN TRI','QUAN TRI VIEN'].indexOf(r)!==-1)return 'ADMIN';
   if(['BAN GIAM DOC','GIAM DOC','PHO GIAM DOC','DIRECTOR'].indexOf(r)!==-1)return 'DIRECTOR';
-  if(['QUYEN TRUONG PHONG','QUYEN TRUONG KHU','QUYEN TRUONG PHONG KHU','ACTING_MANAGER'].indexOf(r)!==-1)return 'ACTING';
-  if(['VICE_MANAGER','DEPUTY_MANAGER','PHO TRUONG PHONG','PHO TRUONG KHU','PHO TRUONG PHONG KHU','PHO PHONG','PHO KHU'].indexOf(r)!==-1)return 'VICE';
+  if(['QUYEN TRUONG PHONG','QUYEN TRUONG KHU','QUYEN TRUONG PHONG KHU','ACTING_MANAGER','ACTING'].indexOf(r)!==-1)return 'ACTING';
+  if(['VICE_MANAGER','DEPUTY_MANAGER','PHO TRUONG PHONG','PHO TRUONG KHU','PHO TRUONG PHONG KHU','PHO PHONG','PHO KHU','VICE'].indexOf(r)!==-1)return 'VICE';
   if(['MANAGER','LEADER','HEAD','LANH DAO','TRUONG PHONG','TRUONG KHU','TRUONG PHONG KHU'].indexOf(r)!==-1)return 'MANAGER';
   if(['EMPLOYEE','USER','NHAN VIEN'].indexOf(r)!==-1)return 'EMPLOYEE';
   return '';
 }
 function isVietnameseSchema_(){return prop_(ACCOUNT_SCHEMA_KEY)==='VI';}
+function isUnifiedSchema_(){return prop_(UNIFIED_SCHEMA_KEY)==='V1';}
+/** YC-034: one admin sheet, one person/email/row; State stays separately unchanged.
+ * Columns A:H are validated by exact labels. Column F accepts comma/semicolon-separated
+ * department codes. Director+BGD+F determines 'BGD phụ trách' without an extra role column.
+ * For a staff member with another post, G describes the role in EVERY additional unit in F;
+ * empty G means the same post as the primary one. No privileged status is inferred from F alone.
+ */
+function unifiedUnits_(raw){
+  return String(raw||'').split(/[,;|\n]+/).map(function(x){return x.trim().toUpperCase();}).filter(Boolean);
+}
+function unifiedModel_(ss){
+  var sh=ss.getSheetByName(SHEET_UNIFIED),errors=[],people=[],assignments=[],departments=[],seen={},roles={};
+  if(!sh)return {people:[],departments:[],assignments:[],errors:['Thiếu tab '+SHEET_UNIFIED+'.']};
+  var headers=sh.getRange(1,1,1,8).getDisplayValues()[0];
+  UNIFIED_HEADERS.forEach(function(h,i){if(String(headers[i]||'').trim()!==h)errors.push('Sai tiêu đề cột '+String.fromCharCode(65+i)+': yêu cầu '+h+'.');});
+  if(errors.length)return {people:[],departments:[],assignments:[],errors:errors};
+  var rows=sh.getLastRow()>1?sh.getRange(2,1,sh.getLastRow()-1,8).getDisplayValues():[];
+  var all={},byUnit={},dup={},emailReg=/^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  rows.forEach(function(r,i){
+    if(!r.some(function(v){return String(v).trim();}))return;
+    var n=i+2,email=String(r[0]||'').trim().toLowerCase(),name=String(r[1]||'').trim(),
+      status=String(r[2]||'').trim(),title=String(r[3]||'').trim(),unit=String(r[4]||'').trim().toUpperCase(),
+      extra=unifiedUnits_(r[5]),other=String(r[6]||'').trim(),admin=String(r[7]||'').trim(),role=roleKind_(title),
+      extraRole=other?roleKind_(other):role;
+    if(!emailReg.test(email))errors.push('Dòng '+n+': email đăng nhập không hợp lệ.');
+    if(seen[email]){errors.push('Dòng '+n+': email trùng dòng '+seen[email]+'.');dup[email]=true;}
+    seen[email]=n;
+    if(!name)errors.push('Dòng '+n+': thiếu họ và tên.');
+    if(['HOAT DONG','NGUNG HOAT DONG'].indexOf(textKey_(status))<0)errors.push('Dòng '+n+': trạng thái không hợp lệ.');
+    if(!role)errors.push('Dòng '+n+': chức danh chính không hợp lệ.');
+    if((role!=='ADMIN'&&!unit)||(unit&&!/^[A-Z0-9_-]+$/.test(unit)))errors.push('Dòng '+n+': mã đơn vị chính không hợp lệ.');
+    if(!['CO','KHONG'].includes(textKey_(admin)))errors.push('Dòng '+n+': Quyền quản trị phải là Có hoặc Không.');
+    if(other&&!extra.length)errors.push('Dòng '+n+': có chức danh kiêm nhiệm nhưng thiếu Phòng/Khu kiêm nhiệm.');
+    if(other&&(!extraRole||extraRole==='ADMIN'||extraRole==='DIRECTOR'))
+      errors.push('Dòng '+n+': chức danh kiêm nhiệm không hợp lệ.');
+    if(role==='DIRECTOR'&&unit!=='BGD')errors.push('Dòng '+n+': Giám đốc/Phó Giám đốc phải có đơn vị chính BGD.');
+    if(role==='DIRECTOR'&&other)errors.push('Dòng '+n+': thành viên BGD không cần nhập chức danh phụ trách ở cột G.');
+    if(role==='ADMIN'&&(extra.length||other))errors.push('Dòng '+n+': Quản trị viên độc lập không có chức vụ nghiệp vụ.');
+    if(role!=='DIRECTOR'&&role!=='ADMIN'&&unit==='BGD')errors.push('Dòng '+n+': BGD chỉ dành cho chức danh Ban Giám đốc.');
+    var unitSet={};unitSet[unit]=true;
+    extra.forEach(function(code){
+      if(!/^[A-Z0-9_-]+$/.test(code)||code==='BGD')errors.push('Dòng '+n+': mã Phòng/Khu phụ trách/kiêm nhiệm sai: '+code+'.');
+      if(unitSet[code])errors.push('Dòng '+n+': Phòng/Khu '+code+' bị lặp.');
+      unitSet[code]=true;
+    });
+    var active=enabled_(status);
+    all[email]={name:name,active:active,title:title,role:role,unit:unit,extra:extra,extraRole:extraRole,admin:admin};
+    people.push([email,name,active?'Hoạt động':'Ngừng hoạt động',title,'',unit,admin]);
+    if(!active||!role||role==='ADMIN')return;
+    var specs=role==='DIRECTOR'?extra.map(function(code){return {unit:code,role:'DIRECTOR'};}):
+      [{unit:unit,role:role}].concat(extra.map(function(code){return {unit:code,role:extraRole};}));
+    specs.forEach(function(spec){
+      if(!spec.unit||spec.unit==='BGD'||!spec.role)return;
+      var d=byUnit[spec.unit]||(byUnit[spec.unit]={unit:spec.unit,head:[],acting:[],director:[],vice:[],employee:[]});
+      var part=spec.role==='MANAGER'?'head':spec.role.toLowerCase();if(d[part])d[part].push(email);
+      assignments.push([email,spec.unit,roleLabel_(spec.role)]);
+    });
+  });
+  if(!rows.length)errors.push('Tab quản trị chưa có tài khoản.');
+  Object.keys(dup).forEach(function(email){
+    // Deny duplicated accounts, even if edits occur after activation.
+    people.forEach(function(r){if(r[0]===email)r[2]='Ngừng hoạt động';});
+    assignments=assignments.filter(function(r){return r[0]!==email;});
+    Object.keys(byUnit).forEach(function(code){var d=byUnit[code];['head','acting','director','vice','employee'].forEach(function(k){d[k]=d[k].filter(function(e){return e!==email;});});});
+  });
+  var leadership=[];
+  Object.keys(all).forEach(function(email){if(all[email].active&&all[email].role==='DIRECTOR'&&!dup[email])leadership.push(email);});
+  if(leadership.length)departments.push(['BGD','Ban Giám đốc','','','','','']);
+  Object.keys(byUnit).sort().forEach(function(key){
+    var d=byUnit[key],head=d.head||[],acting=d.acting||[],director=d.director||[],vice=d.vice||[];
+    if(head.length+acting.length!==1)errors.push('Phòng/Khu '+key+': cần đúng một Trưởng phòng hoặc Quyền Trưởng phòng.');
+    if(director.length!==1)errors.push('Phòng/Khu '+key+': cần đúng một Giám đốc/Phó Giám đốc phụ trách.');
+    if(head.length>1||acting.length>1||director.length>1||vice.length>2)
+      errors.push('Phòng/Khu '+key+': phân công nhiều người cùng thẩm quyền chưa hợp lệ.');
+    if((head[0]||acting[0])===director[0])errors.push('Phòng/Khu '+key+': người đứng đầu không được tự chấm chính mình.');
+    departments.push([key,key,head.length===1?head[0]:'',vice[0]||'',vice[1]||'',acting.length===1?acting[0]:'',director.length===1?director[0]:'']);
+  });
+  // During migration the unit name may be a code. No old admin sheet is consulted in unified mode.
+  var headByUnit={};departments.forEach(function(d){if(d[0]!=='BGD')headByUnit[d[0]]=d[5]||d[2]||'';});
+  people.forEach(function(r){r[4]=headByUnit[r[5]]||'';});
+  return {people:people,departments:departments,assignments:assignments,errors:errors};
+}
+/** Draft creation is explicit. Never edits 3 old tabs or State, never activates itself. */
+function prepareUnifiedAdminSheet(){
+  if(isUnifiedSchema_())throw new Error('Đã kích hoạt tab quản trị hợp nhất.');
+  var ss=book_(),users=ss.getSheetByName(SHEET_USERS),departments=ss.getSheetByName(SHEET_DEPARTMENTS);
+  if(ss.getSheetByName(SHEET_UNIFIED))throw new Error('Đã có tab '+SHEET_UNIFIED+'. Không ghi đè.');
+  if(!users||!departments)throw new Error('Thiếu Tài khoản hoặc Quản lý Phòng-Khu để chuẩn bị dữ liệu.');
+  var assignments=kpiRows_(ss),oldDept=managementRows_(ss),oldUsers=users.getLastRow()>1?
+    users.getRange(2,1,users.getLastRow()-1,7).getDisplayValues():[];
+  var directors={},rolesByEmail={};
+  oldDept.forEach(function(r){var code=String(r[0]||'').trim(),d=String(r[6]||'').trim().toLowerCase();
+    if(code&&d&&!isLeadershipUnit_(code)){if(!directors[d])directors[d]=[];directors[d].push(code);}
+  });
+  assignments.forEach(function(r){var email=String(r[0]||'').trim().toLowerCase(),code=String(r[1]||'').trim(),role=roleKind_(r[2]);
+    if(!email||!code||!role)return;
+    if(!rolesByEmail[email])rolesByEmail[email]=[];
+    rolesByEmail[email].push({unit:code,role:role});
+  });
+  var problems=[],result=[],emails={};
+  oldUsers.forEach(function(r,i){
+    if(!String(r[0]||'').trim())return;
+    var email=String(r[0]||'').trim().toLowerCase(),role=roleKind_(r[3]),unit=String(r[4]||'').trim().toUpperCase(),extra=[],extraRole='';
+    if(emails[email])problems.push('Tài khoản dòng '+(i+2)+' có email trùng.');emails[email]=true;
+    if(role==='DIRECTOR'){unit='BGD';extra=directors[email]||[];}
+    else{
+      var entries=(rolesByEmail[email]||[]).filter(function(a){return a.unit!==unit;});
+      var distinct={};entries.forEach(function(a){distinct[a.role]=true;});
+      var kinds=Object.keys(distinct);
+      if(kinds.length>1)problems.push('Người '+email+' có nhiều chức vụ kiêm nhiệm khác nhau; một cột G không biểu diễn được. Dừng để xin phương án bổ sung.');
+      extra=entries.map(function(a){return a.unit;});
+      if(kinds.length&&kinds[0]!==role)extraRole=roleLabel_(kinds[0]);
+    }
+    result.push([email,r[1],r[2],r[3],unit,extra.join(', '),extraRole,r[6]||'Không']);
+  });
+  if(problems.length)throw new Error('Chưa tạo tab mới: '+problems.join(' | '));
+  var sh=ss.insertSheet(SHEET_UNIFIED);
+  sh.getRange(1,1,1,8).setValues([UNIFIED_HEADERS]);
+  if(result.length)sh.getRange(2,1,result.length,8).setValues(result);
+  configureAdminView_(sh,[270,220,155,225,150,250,245,150]);
+  var count=sh.getMaxRows()-1;
+  if(count>0){
+    sh.getRange(2,3,count,1).setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList(['Hoạt động','Ngừng hoạt động'],true).setAllowInvalid(false).build());
+    sh.getRange(2,4,count,1).setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList(
+      ['Nhân viên','Phó Trưởng phòng/Khu','Trưởng phòng/Khu','Quyền Trưởng phòng/Khu','Giám đốc','Phó Giám đốc','Ban Giám đốc','Quản trị viên'],true).setAllowInvalid(false).build());
+    sh.getRange(2,7,count,1).setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList(
+      ['Nhân viên','Phó Trưởng phòng/Khu','Trưởng phòng/Khu','Quyền Trưởng phòng/Khu'],true).setAllowInvalid(false).build());
+    sh.getRange(2,8,count,1).setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList(['Có','Không'],true).setAllowInvalid(false).build());
+  }
+  sh.getRange(1,6).setNote('Mã đơn vị phụ trách/kiêm nhiệm; nhiều mã phân cách bằng dấu phẩy. Ví dụ TCHC, KHU1. Thành viên BGD KHÔNG cần nhập vai trò tại từng phòng.');
+  sh.getRange(1,7).setNote('Chỉ chọn khi kiêm nhiệm chức danh KHÁC chức danh chính. Chức danh này áp dụng cho tất cả mã phòng ở cột F.');
+  sh.getRange(1,8).setNote('Quyền xem tổng quan ứng dụng, độc lập chức vụ.');
+  SpreadsheetApp.flush();
+  return 'Đã tạo bản NHÁP Nhân sự - Phân quyền với '+result.length+' tài khoản. Ba tab cũ và State giữ nguyên. Kiểm tra chức danh Giám đốc/Phó Giám đốc và phân công F trước khi kích hoạt.';
+}
+function validateUnifiedAdminSheet(){
+  var result=unifiedModel_(book_());
+  return {ok:!result.errors.length,errors:result.errors,accounts:result.people.length,units:result.departments.length,departments:result.departments.length,assignments:result.assignments.length};
+}
+function inspectUnifiedAdminSheet(){
+  var v=validateUnifiedAdminSheet(),message=v.ok?'Hợp lệ: '+v.accounts+' tài khoản, '+v.assignments+' phân công, '+v.departments+' đơn vị.':
+    'Cần sửa '+v.errors.length+' vấn đề:\n'+v.errors.join('\n');
+  Logger.log(message);
+  try{SpreadsheetApp.getUi().alert('Kiểm tra nhân sự và phân quyền',message,SpreadsheetApp.getUi().ButtonSet.OK);}catch(_ignored){}
+  return v;
+}
+function activateUnifiedAdminSheet(){
+  return withLock_(function(){
+    var v=validateUnifiedAdminSheet();
+    if(!v.ok)throw new Error('Chưa thể kích hoạt: '+v.errors.slice(0,12).join(' | '));
+    PropertiesService.getScriptProperties().setProperty(UNIFIED_SCHEMA_KEY,'V1');
+    return 'Đã kích hoạt một tab Nhân sự - Phân quyền. Ba tab cũ/Access và State được giữ nguyên để khôi phục.';
+  });
+}
+function rollbackUnifiedAdminSheet(){
+  return withLock_(function(){
+    PropertiesService.getScriptProperties().deleteProperty(UNIFIED_SCHEMA_KEY);
+    return 'Đã quay về cấu hình quản trị trước khi hợp nhất. Tab hợp nhất, ba tab cũ và State đều được giữ nguyên.';
+  });
+}
 function managementRows_(ss){
+  if(isUnifiedSchema_())return unifiedModel_(ss).departments;
   var sh=ss.getSheetByName(SHEET_DEPARTMENTS);
   return sh&&sh.getLastRow()>1?sh.getRange(2,1,sh.getLastRow()-1,7).getDisplayValues():[];
 }
 /** YC-028: This schema is dormant until the administrator explicitly activates it. */
 function routingV2_(){
   if(typeof PropertiesService==='undefined')return false; // Old VM fixtures have no Script Properties.
-  return isVietnameseSchema_()&&prop_(KPI_ROUTING_KEY)==='V2';
+  return isUnifiedSchema_()||(isVietnameseSchema_()&&prop_(KPI_ROUTING_KEY)==='V2');
 }
 /** BGD là nhóm lãnh đạo cấp đơn vị, không phải Phòng/Khu gửi KPI lên người đứng đầu. */
 function isLeadershipUnit_(unit){return textKey_(unit)==='BGD';}
 function kpiAssignmentKey_(unit,role){return String(unit||'').trim()+'::'+String(role||'').trim();}
 function kpiRows_(ss){
+  if(isUnifiedSchema_())return unifiedModel_(ss).assignments;
   var sh=ss.getSheetByName(SHEET_KPI_ASSIGNMENTS);
   return sh&&sh.getLastRow()>1?sh.getRange(2,1,sh.getLastRow()-1,3).getDisplayValues():[];
 }
@@ -351,6 +530,7 @@ function assignmentForSave_(info,key,type,existing){
 }
 /** Administrator runs manually. Does not touch account or task data or activate itself. */
 function prepareKpiRoutingSheets(){
+  if(isUnifiedSchema_())throw new Error('Đã dùng tab quản trị hợp nhất.');
   if(!isVietnameseSchema_())throw new Error('Cần kích hoạt bảng Tài khoản tiếng Việt trước.');
   if(routingV2_())throw new Error('Cơ chế phân quyền mới đã kích hoạt.');
   var ss=book_(),d=ss.getSheetByName(SHEET_DEPARTMENTS),u=ss.getSheetByName(SHEET_USERS);
@@ -374,6 +554,7 @@ function prepareKpiRoutingSheets(){
  * Không sửa giá trị tài khoản, phân công, trạng thái hay State; không bật phân quyền V2.
  */
 function prepareKpiRoleDropdowns(){
+  if(isUnifiedSchema_())throw new Error('Đã dùng tab Nhân sự - Phân quyền; cấu hình vai trò ở tab hợp nhất.');
   if(!isVietnameseSchema_())throw new Error('Cần sử dụng tab Tài khoản tiếng Việt.');
   var ss=book_(),users=ss.getSheetByName(SHEET_USERS),assignments=ss.getSheetByName(SHEET_KPI_ASSIGNMENTS);
   if(!users||!assignments)throw new Error('Thiếu Tài khoản hoặc Phân công KPI. Hãy kiểm tra tab hiện có.');
@@ -389,6 +570,7 @@ function prepareKpiRoleDropdowns(){
   return 'Đã cho phép chọn Ban Giám đốc/Quyền Trưởng phòng trong Tài khoản và Phân công KPI. Chưa đổi bất kỳ giá trị hoặc kích hoạt V2.';
 }
 function validateKpiRoutingSheets(){
+  if(isUnifiedSchema_())return validateUnifiedAdminSheet();
   var ss=book_(),departments=managementRows_(ss),rows=kpiRows_(ss),active=activeEmailMap_(ss),errors=[];
   if(!ss.getSheetByName(SHEET_KPI_ASSIGNMENTS))return {ok:false,errors:['Chưa có tab Phân công KPI.']};
   if(!departments.length||!rows.length)errors.push('Thiếu Phòng/Khu hoặc phân công chức vụ.');
@@ -435,6 +617,7 @@ function inspectKpiRoutingSheets(){
   return validation;
 }
 function activateKpiRoutingSheets(){
+  if(isUnifiedSchema_())throw new Error('Đang dùng một tab Nhân sự - Phân quyền; không kích hoạt V2 riêng.');
   return withLock_(function(){
     if(!isVietnameseSchema_())throw new Error('Chưa sử dụng tab Tài khoản tiếng Việt.');
     var result=validateKpiRoutingSheets();
@@ -444,10 +627,14 @@ function activateKpiRoutingSheets(){
   });
 }
 function rollbackKpiRoutingSheets(){
+  if(isUnifiedSchema_())throw new Error('Dùng rollbackUnifiedAdminSheet để quay lại cấu hình cũ.');
   return withLock_(function(){PropertiesService.getScriptProperties().deleteProperty(KPI_ROUTING_KEY);
     return 'Đã tắt định tuyến KPI V2. Bảng phân công và State vẫn được giữ nguyên.';});
 }
 function accessRows_(ss){
+  if(isUnifiedSchema_()){
+    return unifiedModel_(ss).people.map(function(r){return [r[0],r[1],r[2],r[3],r[4],r[5],r[6]];});
+  }
   var vietnamese=isVietnameseSchema_(),sh=ss.getSheetByName(vietnamese?SHEET_USERS:SHEET_ACCESS);
   if(!sh)throw new Error('Không tìm thấy tab tài khoản phù hợp. Vui lòng liên hệ quản trị viên.');
   if(sh.getLastRow()<2)return [];
