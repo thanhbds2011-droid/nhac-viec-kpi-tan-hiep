@@ -116,11 +116,12 @@ test('YC-034: quản trị viên ở cột H không mặc định có quyền ch
   assert.equal(h.c.approvedRecipient_(h.c.book_(),'f@example.com'),false);
   assert.equal(h.c.checkAccess_(h.c.book_(),{email:'d@example.com'}).isAdmin,false);
 });
-test('YC-034: thiếu Ban Giám đốc phụ trách, hai Trưởng phòng, trùng email => không cho kích hoạt',()=>{
+test('YC-039: thiếu BGD phụ trách chỉ cảnh báo; trùng Trưởng hoặc trùng email vẫn là lỗi',()=>{
   const h=setup();const sh=h.sheets.get('Nhân sự - Phân quyền');
   sh.rows[4][5]='TCHC';
   let result=h.c.validateUnifiedAdminSheet();
-  assert.equal(result.ok,false);assert.match(result.errors.join('|'),/KHTC/);
+  assert.equal(result.ok,true,result.errors.join('|'));
+  assert.match(result.warnings.join('|'),/KHTC.*chưa có Giám đốc/);
   sh.rows[4][5]='TCHC, KHTC';
   sh.rows.push(['head2@example.com','Trưởng trùng','Hoạt động','Trưởng phòng/Khu','TCHC','','','Không']);
   result=h.c.validateUnifiedAdminSheet();assert.equal(result.ok,false);
@@ -129,8 +130,8 @@ test('YC-034: thiếu Ban Giám đốc phụ trách, hai Trưởng phòng, trùn
   result=h.c.validateUnifiedAdminSheet();assert.equal(result.ok,false);
   assert.match(result.errors.join('|'),/email trùng/);
 });
-test('YC-034: không thể kích hoạt bảng hợp nhất khi dữ liệu chưa hợp lệ, không đổi Property',()=>{
-  const h=setup({inactive:true});h.sheets.get('Nhân sự - Phân quyền').rows[4][5]='TCHC';
+test('YC-039: không thể kích hoạt khi trùng BGD phụ trách, không đổi Property',()=>{
+  const h=setup({inactive:true});h.sheets.get('Nhân sự - Phân quyền').rows[5][5]='TCHC';
   assert.throws(()=>h.c.activateUnifiedAdminSheet(),/Chưa thể kích hoạt/);
   assert.equal(h.props.get('ADMIN_UNIFIED_SCHEMA'),undefined);
 });
@@ -264,4 +265,109 @@ test('YC-037: Giám đốc hoàn thành KPI riêng không tự chọn người c
   assert.match(result.view.notice,/chưa thiết lập tuyến nhắc/);
   assert.equal(h.state('d@example.com').completionOutbox.length,0);
   assert.equal(h.state('d@example.com').tasks.find(x=>x.id===id).deleted,true);
+});
+
+
+test('YC-039: thiếu Trưởng phòng không chặn các tài khoản hợp lệ; bổ sung muộn phục hồi đúng một sự kiện',()=>{
+  const h=setup(),sh=h.sheets.get('Nhân sự - Phân quyền');
+  const manager=sh.rows.splice(2,1)[0]; // Chưa thu thập Gmail của Trưởng TCHC.
+  const valid=h.c.validateUnifiedAdminSheet();
+  assert.equal(valid.ok,true,valid.errors.join(' | '));
+  assert.match(valid.warnings.join('|'),/TCHC: chưa có Trưởng phòng/);
+  const task=h.add('f@example.com','kpi','TCHC::EMPLOYEE','KPI nhân viên trước khi có trưởng');
+  const result=h.run('f@example.com','remove',{id:task,mode:'completed'});
+  assert.match(result.view.notice,/chưa xác định/);
+  assert.equal(h.state('f@example.com').completionOutbox.length,1);
+  assert.equal(h.state('f@example.com').tasks.find(x=>x.id===task).deleted,true);
+  sh.rows.push(manager); // Ban quản trị chỉ bổ sung dòng tài khoản, không sửa State.
+  assert.equal(h.c.validateUnifiedAdminSheet().ok,true);
+  // Người nhận chưa từng đăng nhập => State chưa tồn tại, giữ nguyên hàng chờ.
+  const rows=h.sheets.get('State').getRange(2,1,h.sheets.get('State').getLastRow()-1,4).getValues();
+  h.c.recoverPendingCompletions_(h.c.book_(),rows,0,8);
+  assert.equal(h.state('f@example.com').completionOutbox.length,1);
+  h.run('b@example.com','load');
+  assert.equal(h.state('b@example.com').inbox.length,1);
+  assert.equal(h.state('f@example.com').completionOutbox.length,0);
+  h.run('b@example.com','load');
+  assert.equal(h.state('b@example.com').inbox.length,1,'Retry must not duplicate');
+});
+
+test('YC-039: thiếu BGD phụ trách => vẫn gửi nhân viên cho Trưởng, lưu KPI của Trưởng đến khi phân công',()=>{
+  const h=setup(),sh=h.sheets.get('Nhân sự - Phân quyền');
+  sh.rows[4][5]='KHTC'; // TCHC chưa có BGD phụ trách.
+  const valid=h.c.validateUnifiedAdminSheet();assert.equal(valid.ok,true);
+  assert.match(valid.warnings.join('|'),/TCHC: chưa có Giám đốc/);
+  h.run('b@example.com','load');
+  const employee=h.add('f@example.com','kpi','TCHC::EMPLOYEE','Công việc nhân viên');
+  h.run('f@example.com','remove',{id:employee,mode:'completed'});
+  assert.equal(h.state('b@example.com').inbox.length,1,'Missing BGD must not stop valid first-level route');
+  const headTask=h.add('b@example.com','kpi','TCHC::MANAGER','Công việc Trưởng');
+  h.run('b@example.com','remove',{id:headTask,mode:'completed'});
+  assert.equal(h.state('b@example.com').completionOutbox.length,1);
+  sh.rows[4][5]='KHTC, TCHC';
+  h.run('d@example.com','load');
+  assert.equal(h.state('d@example.com').inbox.length,1);
+  assert.equal(h.state('b@example.com').completionOutbox.length,0);
+});
+
+test('YC-039: chưa có Giám đốc => Phó Giám đốc hoàn thành vẫn lưu chờ và chuyển sau khi Giám đốc đăng nhập',()=>{
+  const h=setup(),sh=h.sheets.get('Nhân sự - Phân quyền');
+  const director=sh.rows.splice(4,1)[0];
+  assert.equal(h.c.validateUnifiedAdminSheet().ok,true);
+  assert.match(h.c.validateUnifiedAdminSheet().warnings.join('|'),/Ban Giám đốc: chưa có Giám đốc/);
+  const task=h.add('e@example.com','kpi','BGD::DIRECTOR','Phó Giám đốc hoàn thành');
+  h.run('e@example.com','remove',{id:task,mode:'completed'});
+  assert.equal(h.state('e@example.com').completionOutbox.length,1);
+  sh.rows.push(director);
+  h.run('d@example.com','load');
+  assert.equal(h.state('d@example.com').inbox.length,1);
+  assert.equal(h.state('e@example.com').completionOutbox.length,0);
+});
+
+test('YC-039: nhiều Giám đốc là lỗi, không gửi nhiệm vụ Phó Giám đốc nhầm người',()=>{
+  const h=setup(),sh=h.sheets.get('Nhân sự - Phân quyền');
+  sh.rows.push(['g@example.com','Giám đốc thứ hai','Hoạt động','Giám đốc','BGD','','','Không']);
+  const check=h.c.validateUnifiedAdminSheet();
+  assert.equal(check.ok,false);
+  assert.match(check.errors.join('|'),/nhiều hơn một Giám đốc/);
+  const job=h.add('e@example.com','kpi','BGD::DIRECTOR','Việc Phó Giám đốc');
+  const done=h.run('e@example.com','remove',{id:job,mode:'completed'});
+  assert.match(done.view.notice,/chưa xác định/);
+  assert.equal(h.state('e@example.com').completionOutbox.length,1);
+});
+
+
+test('YC-039: cảnh báo thiếu nhân sự không làm mất State, dữ liệu phòng và tab cũ khi kích hoạt',()=>{
+  const h=setup({inactive:true}),sh=h.sheets.get('Nhân sự - Phân quyền');
+  sh.rows.splice(2,1);sh.rows[3][5]=''; // thiếu Trưởng TCHC và BGD phụ trách một phòng
+  const before=JSON.stringify(h.sheets.get('State').rows);
+  const v=h.c.validateUnifiedAdminSheet();
+  assert.equal(v.ok,true,v.errors.join('|'));
+  assert.ok(v.warnings.length>=2);
+  assert.match(h.c.activateUnifiedAdminSheet(),/cảnh báo/);
+  assert.equal(h.props.get('ADMIN_UNIFIED_SCHEMA'),'V1');
+  assert.equal(JSON.stringify(h.sheets.get('State').rows),before);
+  assert.ok(h.sheets.has('Tài khoản')&&h.sheets.has('Quản lý Phòng-Khu'));
+});
+
+test('YC-039: người nhận đã từng đăng nhập được khôi phục qua trigger khi bổ sung phân công muộn',()=>{
+  const h=setup(),sh=h.sheets.get('Nhân sự - Phân quyền');
+  h.run('b@example.com','load'); // Có State từ trước.
+  sh.rows[2][2]='Ngừng hoạt động'; // Trưởng tạm chưa có tài khoản hoạt động.
+  assert.equal(h.c.validateUnifiedAdminSheet().ok,true);
+  assert.match(h.c.validateUnifiedAdminSheet().warnings.join('|'),/TCHC: chưa có Trưởng phòng/);
+  const one=h.add('f@example.com','kpi','TCHC::EMPLOYEE','KPI số 1');
+  const two=h.add('f@example.com','kpi','TCHC::EMPLOYEE','KPI số 2');
+  h.run('f@example.com','remove',{id:one,mode:'completed'});
+  h.run('f@example.com','remove',{id:two,mode:'completed'});
+  assert.equal(h.state('f@example.com').completionOutbox.length,2);
+  sh.rows[2][2]='Hoạt động'; // Bổ sung/kích hoạt lại Gmail hợp lệ.
+  const pushed=[];h.c.syncManagerByEmail_=email=>pushed.push(email);
+  const rows=h.sheets.get('State').getRange(2,1,h.sheets.get('State').getLastRow()-1,4).getValues();
+  h.c.recoverPendingCompletions_(h.c.book_(),rows,0,8);
+  assert.equal(h.state('b@example.com').inbox.length,2);
+  assert.equal(h.state('f@example.com').completionOutbox.length,0);
+  assert.deepEqual(pushed,['b@example.com']);
+  h.c.recoverPendingCompletions_(h.c.book_(),rows,0,8);
+  assert.equal(h.state('b@example.com').inbox.length,2);
 });

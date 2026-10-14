@@ -350,14 +350,23 @@ function unifiedModel_(ss){
   Object.keys(all).forEach(function(email){if(all[email].active&&all[email].role==='DIRECTOR'&&!dup[email])leadership.push(email);});
   if(leadership.length)departments.push(['BGD','Ban Giám đốc','','','','','']);
   var heads=Object.keys(all).filter(function(email){return all[email].active&&!dup[email]&&directorLevel_(all[email].title)==='HEAD';});
-  if(heads.length!==1)warnings.push('Ban Giám đốc: cần ghi rõ đúng một tài khoản Giám đốc đang hoạt động ở cột D; nếu chưa đúng, thông báo Phó Giám đốc → Giám đốc sẽ được giữ chờ.');
+  if(!heads.length)warnings.push('Ban Giám đốc: chưa có Giám đốc đang hoạt động được xác định tại cột D. Tài khoản khác vẫn sử dụng được; thông báo KPI của Phó Giám đốc sẽ lưu chờ.');
+  if(heads.length>1)errors.push('Ban Giám đốc: có nhiều hơn một Giám đốc đang hoạt động. Cần làm rõ đúng một Giám đốc để tránh gửi thông báo sai người.');
   Object.keys(byUnit).sort().forEach(function(key){
     var d=byUnit[key],head=d.head||[],acting=d.acting||[],director=d.director||[],vice=d.vice||[];
-    if(head.length+acting.length!==1)errors.push('Phòng/Khu '+key+': cần đúng một Trưởng phòng hoặc Quyền Trưởng phòng.');
-    if(director.length!==1)errors.push('Phòng/Khu '+key+': cần đúng một Giám đốc/Phó Giám đốc phụ trách.');
+    // YC-039: Missing approvers are temporary onboarding warnings, not global errors.
+    // Ambiguous / conflicting approvers remain errors and fail closed at routing time.
+    if(!head.length&&!acting.length)
+      warnings.push('Phòng/Khu '+key+': chưa có Trưởng phòng hoặc Quyền Trưởng phòng. Công việc vẫn dùng được; thông báo chấm KPI sẽ lưu chờ đến khi bổ sung tài khoản hợp lệ.');
+    if(head.length+acting.length>1)
+      errors.push('Phòng/Khu '+key+': nhiều người đồng thời có quyền Trưởng/Quyền Trưởng phòng. Phải xác định duy nhất một người.');
+    if(!director.length)
+      warnings.push('Phòng/Khu '+key+': chưa có Giám đốc/Phó Giám đốc phụ trách. Công việc vẫn dùng được; thông báo chấm KPI của Trưởng/Quyền Trưởng sẽ lưu chờ.');
+    if(director.length>1)
+      errors.push('Phòng/Khu '+key+': nhiều thành viên Ban Giám đốc cùng phụ trách KPI. Phải xác định duy nhất một người.');
     if(head.length>1||acting.length>1||director.length>1||vice.length>2)
       errors.push('Phòng/Khu '+key+': phân công nhiều người cùng thẩm quyền chưa hợp lệ.');
-    if((head[0]||acting[0])===director[0])errors.push('Phòng/Khu '+key+': người đứng đầu không được tự chấm chính mình.');
+    if((head[0]||acting[0])&&(head[0]||acting[0])===director[0])errors.push('Phòng/Khu '+key+': người đứng đầu không được tự chấm chính mình.');
     departments.push([key,key,head.length===1?head[0]:'',vice[0]||'',vice[1]||'',acting.length===1?acting[0]:'',director.length===1?director[0]:'']);
   });
   // During migration the unit name may be a code. No old admin sheet is consulted in unified mode.
@@ -423,9 +432,10 @@ function validateUnifiedAdminSheet(){
   return {ok:!result.errors.length,errors:result.errors,warnings:result.warnings||[],accounts:result.people.length,units:result.departments.length,departments:result.departments.length,assignments:result.assignments.length};
 }
 function inspectUnifiedAdminSheet(){
-  var v=validateUnifiedAdminSheet(),message=v.ok?'Hợp lệ: '+v.accounts+' tài khoản, '+v.assignments+' phân công, '+v.departments+' đơn vị.':
-    'Cần sửa '+v.errors.length+' vấn đề:\n'+v.errors.join('\n');
-  if(v.warnings&&v.warnings.length)message+='\n\nCần kiểm tra bổ sung ('+v.warnings.length+'):\n'+v.warnings.join('\n');
+  var v=validateUnifiedAdminSheet(),message=v.ok?
+    'Không có lỗi phân quyền nghiêm trọng. Đang quản lý '+v.accounts+' tài khoản, '+v.assignments+' phân công, '+v.departments+' đơn vị.':
+    'Có '+v.errors.length+' LỖI phân quyền cần sửa trước khi sử dụng các phân công liên quan:\n'+v.errors.join('\n');
+  if(v.warnings&&v.warnings.length)message+='\n\nCẢNH BÁO đang bổ sung nhân sự ('+v.warnings.length+'):\n'+v.warnings.join('\n');
   Logger.log(message);
   try{SpreadsheetApp.getUi().alert('Kiểm tra nhân sự và phân quyền',message,SpreadsheetApp.getUi().ButtonSet.OK);}catch(_ignored){}
   return v;
@@ -435,7 +445,7 @@ function activateUnifiedAdminSheet(){
     var v=validateUnifiedAdminSheet();
     if(!v.ok)throw new Error('Chưa thể kích hoạt: '+v.errors.slice(0,12).join(' | '));
     PropertiesService.getScriptProperties().setProperty(UNIFIED_SCHEMA_KEY,'V1');
-    return 'Đã kích hoạt một tab Nhân sự - Phân quyền. Ba tab cũ/Access và State được giữ nguyên để khôi phục.';
+    return 'Đã kích hoạt một tab Nhân sự - Phân quyền. Có '+(v.warnings||[]).length+' cảnh báo cần bổ sung nhân sự; thông báo thiếu người nhận sẽ lưu chờ. Ba tab cũ/Access và State giữ nguyên.';
   });
 }
 function rollbackUnifiedAdminSheet(){
