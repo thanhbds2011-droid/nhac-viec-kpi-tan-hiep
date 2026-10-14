@@ -1,0 +1,7 @@
+{
+  "version": "10.0.19",
+  "releasedAt": "2026-10-14",
+  "title": "Tìm nhanh chỉ tiêu và giao diện đã duyệt",
+  "businessBaseline": "UI kế thừa mã nguồn ZIP v10.0.17; bảo toàn hành trình v10.0.15 + correction v10.0.14/13; căn heading Dashboard theo yêu cầu v10.0.18.",
+  "message": "YC-YTE-001..005: tìm kiếm danh mục/chức năng; căn toolbar Tổng quan; bỏ Biểu đồ xu hướng; menu Mobile toàn màn hình và bỏ bottom nav; biểu mẫu Nhập liệu chọn trực tiếp chỉ tiêu, không lặp card. Không thay đổi RTDB schema, Firebase Rules hoặc Apps Script Gateway."
+}
