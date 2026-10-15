@@ -31,7 +31,7 @@ test('YC-040: favicon/PWA icon đều là logo mới và đúng kích thước',
   assert.match(html,/apple-touch-icon\.png\?v=1\.9\.3-hf2/);
 });
 test('YC-040: giữ tự kiểm tra bản web mới; không thay mã quản lý công việc và Chrome Extension',()=>{
-  assert.match(read('api/config.js').toString(),/appVersion: '1\.9\.3-hf3'/);
-  assert.match(read('public/app.js').toString(),/const APP_VERSION='1\.9\.3-hf3'/);
+  assert.match(read('api/config.js').toString(),/appVersion: '1\.9\.3-hf4'/);
+  assert.match(read('public/app.js').toString(),/const APP_VERSION='1\.9\.3-hf4'/);
   assert.match(read('chrome-extension/manifest.json').toString(),/"version": "1\.1\.0"/);
 });
