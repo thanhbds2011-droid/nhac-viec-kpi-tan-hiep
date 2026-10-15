@@ -408,3 +408,34 @@ dialog.compat-dialog-open{display:block;position:fixed;z-index:1000;top:50%;left
 .brand-icon .brand-logo{display:block;width:100%;height:100%;object-fit:contain;}
 .login-symbol.logo-login{background:#fff;padding:5px;overflow:hidden;}
 .login-symbol .login-logo{display:block;width:100%;height:100%;object-fit:contain;}
+
+
+/* YC-042: approved skyline theme, UI presentation only. Keep original components,
+ * task workflows, blue header, task status colors, and mobile navigation unchanged.
+ * Landmark 81 photo supplied by the user; the warm overlay preserves readable text. */
+body{
+  background-image:
+    linear-gradient(110deg,rgba(166,11,24,.62) 0%,rgba(229,70,19,.38) 45%,rgba(255,165,57,.14) 100%),
+    url('/images/landmark-81-hcm.jpg');
+  background-repeat:no-repeat,no-repeat;
+  background-size:cover,158% auto;
+  background-position:center center,left top;
+}
+/* Contrast and the white controls on the approved desktop mockup. */
+.welcome-title{color:#fff;}
+.welcome-subtitle{color:#fff6eb;}
+.account-email{color:#ffe7d9;}
+.task-total{background:rgba(255,255,255,.96);border-color:rgba(255,255,255,.9);box-shadow:0 5px 18px rgba(97,32,25,.10);}
+.desktop-tools{background:rgba(255,255,255,.96);box-shadow:0 5px 18px rgba(97,32,25,.08);}
+.panel{box-shadow:0 11px 36px rgba(77,40,39,.13);}
+footer{color:#fff6ec;text-shadow:0 1px 3px rgba(79,25,25,.55);}
+@media(max-width:720px){
+  /* Stable crop on smaller screens; no extra worker or fixed overlay. */
+  body{
+    background-image:
+      linear-gradient(125deg,rgba(168,19,28,.56) 0%,rgba(233,98,25,.35) 58%,rgba(255,170,57,.22) 100%),
+      url('/images/landmark-81-hcm.jpg');
+    background-size:cover,auto 100%;
+    background-position:center center,53% center;
+  }
+}

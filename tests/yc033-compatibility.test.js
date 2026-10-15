@@ -98,9 +98,9 @@ test('YC-033: màn hình mới vẫn theo bản V1.9.0, thêm fallback viewport 
   assert.match(css,/@media\(max-width:720px\)/);
   assert.match(html,/\/styles\.css\?v=1\.9\.3/);
   assert.match(html,/\/app\.js\?v=1\.9\.3/);
-  assert.match(html,/Phiên bản 1\.9\.3-HF4/);
+  assert.match(html,/Phiên bản 1\.9\.3-HF5/);
   const pkg=JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8'));
-  assert.equal(pkg.version,'1.9.3-hf4');
+  assert.equal(pkg.version,'1.9.3-hf5');
 });
 
 test('YC-033: OneSignal worker, các API không sửa và Extension giữ baseline; api/data.js đổi có kiểm thử YC-035',()=>{
@@ -114,7 +114,7 @@ test('YC-033: OneSignal worker, các API không sửa và Extension giữ baseli
   };
   for(const [file,expected] of Object.entries(sha)){
     const bytes=fs.readFileSync(path.join(root,file));
-    const unchangedSource=file==='api/config.js'?Buffer.from(bytes.toString('utf8').replace("appVersion: '1.9.3-hf4'","appVersion: '1.9.3'"),'utf8'):bytes;
+    const unchangedSource=file==='api/config.js'?Buffer.from(bytes.toString('utf8').replace("appVersion: '1.9.3-hf5'","appVersion: '1.9.3'"),'utf8'):bytes;
     const actual=crypto.createHash('sha256').update(unchangedSource).digest('hex');
     assert.equal(actual,expected,'Không được thay đổi nghiệp vụ baseline: '+file);
   }
